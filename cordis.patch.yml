@@ -3,7 +3,9 @@
       name: '@local/dsh-agents-guard'
       config:
         denyCompress: true
+        compressPressureRatio: 0.8
         writeIndex: true
         ambiguityGate: true
         reasoningGate: true
+        maxReasoningQuestions: 8
         maxCardChars: 4200

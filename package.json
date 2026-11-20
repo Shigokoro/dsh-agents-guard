@@ -1,11 +1,11 @@
 {
   "name": "@local/dsh-agents-guard",
-  "version": "0.3.1",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check lib/core.mjs && node --check lib/index.mjs",
-    "test": "node test/core.test.mjs"
+    "check": "node --check lib/core.mjs && node --check lib/index.mjs && node --check test/core.test.mjs && node --check test/guard.test.mjs",
+    "test": "node test/core.test.mjs && node test/guard.test.mjs"
   },
   "description": "Maintains a session index, records model-written memory, and blocks mutation while a user ambiguity or a reasoning question is unresolved.",
   "license": "MIT",
