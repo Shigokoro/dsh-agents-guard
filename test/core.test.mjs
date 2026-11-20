@@ -177,6 +177,7 @@ pr = reduceEvent(pr, { type: 'turn/start', seq: 1, data: { turn: 1 } });
 pr = reduceEvent(pr, user(10, '必须记住：先记录再压缩'));
 assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, false);
 assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, false);
+assert.match(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).reason, /JSON/);
 assert.equal(decideRecord({ state: pr, toolName: 'read', code: '', config: {} }).allow, true);
 assert.equal(decideRecord({ state: pr, toolName: 'agents_memory', code: '', config: {} }).allow, true);
 assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({"action":"add","kind":"requirement","text":"x"})', config: {} }).allow, true, 'one JSON memory call must be allowed while recording is due');
