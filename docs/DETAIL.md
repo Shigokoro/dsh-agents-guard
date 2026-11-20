@@ -13,7 +13,7 @@ dsh-agents-guard is a Host plugin. It registers a host-only session projection n
 - ambiguity state, from user messages and ask_user/run_code calls (WAITING marker);
 - per-question reasoning state, from assistant/message and assistant/attempt reasoning blocks; each question has an ID and a resolved/asked state.
 
-At turn/start the plugin builds a compact memory card and injects it through agent.inject with source kind plugin:dsh-agents-guard. At turn/end and on user/message it updates AGENT_CONTEXT_INDEX.md. The generated block is delimited by HTML comments; content outside the block is preserved.
+At turn/start the plugin builds a compact memory card and injects it through agent.inject with source kind plugin:dsh-agents-guard. At turn/end and on user/message it updates `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`; it never writes the workspace-root file. The generated block is delimited by HTML comments; content outside the block is preserved.
 
 ## Model-written memory
 

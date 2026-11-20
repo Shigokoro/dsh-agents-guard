@@ -6,7 +6,7 @@ A Host-only DSH bundle that maintains a session index, accepts model-written mem
 
 - Folds user messages, candidate decisions, open items, tool failures, and changed files from the committed session log with a host-only session projection.
 - Injects a compact memory card at the start of each turn, labelled as plugin-maintained history rather than a new user instruction.
-- Updates AGENT_CONTEXT_INDEX.md in the session working directory, preserving hand-written content outside the generated block.
+- Updates `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`, preserving hand-written content outside the generated block. It never writes `AGENT_CONTEXT_INDEX.md` in the workspace root.
 - Registers agents_index for on-demand index retrieval: the compact card, the generated Markdown block, counts, and the current open reasoning questions, without opening the file by hand.
 - Registers agents_memory so the model can record a note, open item, error, or assumption. The host sets source=model and authority=model-inferred (or assumption); the model cannot claim user-confirmed or tested. A successful tool result adds the entry to the next card and to the Markdown index. User messages are indexed as user-stated; decisions and verified facts should still cite evidence.
 - Registers a tool guard for compress. The guard normally denies the call when the card was not injected for the current turn, or when the latest user message arrived after the injected card; `legacyCompressWithoutCard` (default true) allows a session with no card at all. Exception: when the official `tokenMeter.contextPressure()` reports `pressureTokens / contextWindow` at or above `compressPressureRatio` (default 0.8), compress is allowed even if the card is stale or the ambiguity/reasoning gates are open.
@@ -30,6 +30,7 @@ AGENTS.md requires a persistent session index, forbids treating a compression re
 - legacyCompressWithoutCard: default true. Allow compress in a session that has never injected a card (an older session resumed before its first turn start). Set false to require a current card.
 - writeIndex: default true. Set false to skip the Markdown file.
 - indexFileName: default AGENT_CONTEXT_INDEX.md.
+- indexRoot: default `$DSH_HOME/agent-context`; the file is under `<indexRoot>/<sessionId>/`.
 - maxCardChars: default 4200.
 - maxRequirements: default 12.
 - maxDecisions: default 6.

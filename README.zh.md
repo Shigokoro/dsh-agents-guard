@@ -4,7 +4,7 @@
 
 ## 能力
 
-- 从会话事件折叠用户要求/纠错、候选决策、未决项、工具失败和改动文件，写入 `AGENT_CONTEXT_INDEX.md`（保留手工内容）。
+- 从会话事件折叠用户要求/纠错、候选决策、未决项、工具失败和改动文件，写入 `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`（保留手工内容），不写工作区根目录。
 - `agents_index` 按需读取索引：紧凑卡片、生成区块、计数和当前未决疑问，不需要手动打开文件。
 - 每轮开始注入紧凑的“历史上下文卡”，明确标为历史上下文，不是新的用户指令。
 - `agents_memory` 记录模型笔记、error、open item 或 assumption；source 固定为 model，authority 由宿主派生为 model-inferred 或 assumption，模型不能自报 user-confirmed/tested。用户消息作为 user-stated 索引；verified/decision 仍应带 evidence。
@@ -26,6 +26,7 @@
 - `legacyCompressWithoutCard`: 默认 true；允许从未注入过索引卡的旧会话压缩；设为 false 强制要求本轮卡。
 - `writeIndex`: 默认 true。
 - `indexFileName`: 默认 `AGENT_CONTEXT_INDEX.md`。
+- `indexRoot`: 默认 `$DSH_HOME/agent-context`；实际文件位于 `<indexRoot>/<sessionId>/`。
 - `maxCardChars` / `maxRequirements` / `maxDecisions` / `maxOpenItems` / `maxFailures` / `maxChangedFiles` / `maxLlmEntries`: 卡片与索引上限。
 - `ambiguityGate` / `ambiguityAllowRunCodeWithAsk` / `ambiguityTools`：歧义闸门。
 - `reasoningGate` / `reasoningTools` / `reasoningVerifyTools`：思考疑问闸门；`reasoningAllowReadOnlyRunCode` 已废弃且不生效，安全单调用由内置白名单控制，任意代码不再被当作只读。
