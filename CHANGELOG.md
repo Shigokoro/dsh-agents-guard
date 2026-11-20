@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Capture a single inner `agents_memory` call made through `run_code` in the outer tool/call record. The projection now persists the entry, so it survives a plugin reload instead of disappearing with the transient runtime store.
+- Add a JSON-persistence test for that path.
+
 ## 0.5.1
 
 - Re-inject the index card after a compression epoch (`state.compressions` changes) even when the card text is unchanged. Previously the `lastCardHash` short-circuit could skip the card after compression removed it from the live context, allowing a later compress without a current card.

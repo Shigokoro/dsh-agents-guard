@@ -424,4 +424,22 @@ const roundTripQuestion = openReasoningQuestions(roundTrip)[0];
 const resolvedRoundTrip = resolveReasoningQuestion(roundTrip, roundTripQuestion.id, 101, "checked after restart");
 assert.equal(openReasoningQuestions(resolvedRoundTrip).length, 0);
 
+const memoryCode = 'await tools.agents_memory(' + JSON.stringify({ action: 'add', kind: 'verified', text: 'persisted memory', evidence: 'unit' }) + ')';
+let memoryState = emptyState({ cwd: 'C:/work' });
+memoryState = reduceEvent(memoryState, {
+  type: 'tool/call',
+  seq: 120,
+  data: { callId: 'mem-1', name: 'run_code', arguments: JSON.stringify({ code: memoryCode }) },
+});
+assert.equal(memoryState.pendingCalls['mem-1'].memory.kind, 'verified', 'outer run_code must capture inner agents_memory arguments');
+memoryState = reduceEvent(memoryState, {
+  type: 'tool/result',
+  seq: 121,
+  data: { message: { toolCallId: 'mem-1', content: [{ type: 'text', text: 'ok' }], isError: false } },
+});
+assert.equal(memoryState.llmEntries.length, 1, 'successful inner memory must enter the projection');
+assert.equal(memoryState.llmEntries[0].text, 'persisted memory');
+const memoryAfterRestart = JSON.parse(JSON.stringify(memoryState));
+assert.equal(memoryAfterRestart.llmEntries.length, 1, 'memory must survive JSON persistence across a reload');
+
 console.log("core tests passed");
