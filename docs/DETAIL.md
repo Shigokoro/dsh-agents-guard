@@ -62,10 +62,12 @@ While the gate is open, write, edit, pwsh, compress, and non-read-only run_code 
 
 The projection state is checkpointed by DSH and can refold from the session log. Injection bookkeeping is process-local, so after a restart the first turn must inject a fresh card before compression is allowed. The plugin does not parse or rewrite the compress arguments; it gates on index coverage, not on a specific range. The Markdown writer uses the session working directory and preserves manual content outside the generated block. If two sessions share one working directory, the last writer wins; the generated block names the session id.
 
+Gate coverage also classifies known mutating tool names beyond the configured lists: apply_patch, terminal, create/update/delete/push/merge and similar. Unknown capabilities still require a host inventory and are not proven read-only.
+
 The ambiguity detector is conservative but not semantic. It can miss ambiguity or flag a harmless phrase. When it fires, the correct response is to ask a concrete question, not to bypass the gate. The gate does not open on ask_user; it only enters WAITING and opens when a later non-ambiguous user message arrives.
 
 The reasoning detector is heuristic. It prefers explicit uncertainty and direct self-questions; a bare question mark is not enough. Ordinary planning phrases are ignored, but a subtle doubt can be missed. The gate clears on a successful read-only verification or on a new user message; ask_user only moves it to WAITING. It cannot prove that verification actually answered the question; it only observes a successful read-only call.
 
 agents_memory writes a runtime entry and calls the Markdown writer immediately. The runtime map is process-local; the Markdown index keeps the entry after restart, but the card does not reload it automatically.
 
-Each agents_memory entry carries an authority level: user-confirmed, user-stated, tested, model-inferred, or assumption. The model supplies or defaults it; it is a label, not independent verification. The card and Markdown index show it next to the entry kind.
+Each agents_memory entry is host-classified as model-inferred or assumption. The tool no longer accepts model-supplied source or authority, so the model cannot claim user-confirmed or tested. User messages are indexed as user-stated. The label is provenance, not independent verification.

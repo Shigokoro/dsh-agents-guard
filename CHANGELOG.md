@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- `agents_memory` no longer accepts model-supplied `source` or `authority`; the host records model notes as `model-inferred` or `assumption`. User messages are indexed as `user-stated`.
+- `mergeMemory` deduplicates runtime entries against the projection by content key and removes duplicated cache entries.
+- Gate coverage adds a mutating-tool classifier (`apply_patch`, `terminal`, `push_files`, etc.) beyond the configured name lists.
+
 ## 0.4.0
 
 - `ask_user` now moves ambiguity and reasoning gates to WAITING; it no longer clears them. The gates stay blocked until a user answer (or, for reasoning, a successful read-only verification).

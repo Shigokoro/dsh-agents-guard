@@ -12,6 +12,8 @@ import {
   authorityFor,
   isAmbiguous,
   isReasoningQuestion,
+  isMutatingToolName,
+  mergeLlmEntries,
   normalizeConfig,
   redactSecrets,
   reasoningTextOf,
@@ -109,6 +111,10 @@ assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: 
 assert.equal(decideAmbiguity({ state: amb, toolName: 'ask_user', code: '', config: {} }).allow, true);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.ask_user({})', config: {} }).allow, true);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'apply_patch', code: '', config: {} }).allow, false);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'terminal', code: '', config: {} }).allow, false);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'read', code: '', config: {} }).allow, true);
+assert.equal(amb.requirements[0].authority, 'user-stated');
 amb = reduceEvent(amb, {
   type: 'tool/call',
   seq: 3,
@@ -129,27 +135,33 @@ mem = reduceEvent(mem, {
   data: {
     callId: 'mem-1',
     name: 'agents_memory',
-    arguments: JSON.stringify({ action: 'add', kind: 'decision', text: '采用插件方案', source: 'user', evidence: 'm00829', authority: 'user-confirmed' }),
+    arguments: JSON.stringify({ action: 'add', kind: 'decision', text: '采用插件方案', evidence: 'm00829' }),
   },
 });
 assert.equal(mem.pendingCalls['mem-1'].memory.kind, 'decision');
-assert.equal(mem.pendingCalls['mem-1'].memory.authority, 'user-confirmed');
+assert.equal(mem.pendingCalls['mem-1'].memory.authority, undefined, 'tool args must not carry model authority');
 mem = reduceEvent(mem, {
   type: 'tool/result',
   seq: 11,
   data: { message: { toolCallId: 'mem-1', content: [], isError: false } },
 });
 assert.equal(mem.llmEntries.length, 1);
-assert.equal(mem.llmEntries[0].authority, 'user-confirmed');
+assert.equal(mem.llmEntries[0].source, 'model');
+assert.equal(mem.llmEntries[0].authority, 'model-inferred');
 assert.match(buildCard(mem, {}), /LLM 记录/);
-assert.match(buildCard(mem, {}), /decision\|user-confirmed/);
+assert.match(buildCard(mem, {}), /decision\|model-inferred/);
 assert.match(renderIndexMarkdown(mem, 's', {}), /采用插件方案/);
 
-assert.equal(authorityFor('model', 'decision', ''), 'model-inferred');
-assert.equal(authorityFor('user', 'requirement', ''), 'user-stated');
-assert.equal(authorityFor('tool', 'verified', ''), 'tested');
-assert.equal(authorityFor('model', 'assumption', ''), 'assumption');
-assert.equal(authorityFor('model', 'verified', 'user-confirmed'), 'user-confirmed');
+assert.equal(authorityFor('decision'), 'model-inferred');
+assert.equal(authorityFor('verified'), 'model-inferred');
+assert.equal(authorityFor('assumption'), 'assumption');
+assert.equal(isMutatingToolName('apply_patch'), true);
+assert.equal(isMutatingToolName('terminal'), true);
+assert.equal(isMutatingToolName('mcp__github__push_files'), true);
+assert.equal(isMutatingToolName('read'), false);
+assert.equal(isMutatingToolName('agents_memory'), false);
+const dupe = { kind: 'decision', text: 'x', evidence: 'e' };
+assert.equal(mergeLlmEntries([dupe], [dupe]).length, 1);
 assert.equal(isReasoningQuestion('我不确定这个字段是否存在'), true);
 assert.equal(isReasoningQuestion('是否应该用 A？'), true);
 assert.equal(isReasoningQuestion('函数返回 3。'), false);
@@ -177,6 +189,9 @@ assert.equal(decideReasoning({ state: reas, toolName: 'read', code: '', config: 
 assert.equal(decideReasoning({ state: reas, toolName: 'run_code', code: 'await tools.read({})', config: {} }).allow, true);
 assert.equal(decideReasoning({ state: reas, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false);
 assert.equal(decideReasoning({ state: reas, toolName: 'agents_memory', code: '', config: {} }).allow, true);
+assert.equal(decideReasoning({ state: reas, toolName: 'apply_patch', code: '', config: {} }).allow, false);
+assert.equal(decideReasoning({ state: reas, toolName: 'terminal', code: '', config: {} }).allow, false);
+assert.equal(decideReasoning({ state: reas, toolName: 'read', code: '', config: {} }).allow, true);
 reas = reduceEvent(reas, {
   type: 'tool/call',
   seq: 31,
