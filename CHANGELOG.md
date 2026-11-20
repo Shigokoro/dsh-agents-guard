@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.6
+
+- Add a recall-first gate: when a user message asks about earlier work, requirements, decisions, corrections, or context, `session_search` and the other fallback search tools are denied until `agents_index` has run for this turn. The card and system prompt name `agents_index` as the first recall tool.
+- Add a record-first gate: when a user message states a requirement, correction, decision, or acceptance criterion, write/edit/pwsh/compress and non-read-only `run_code` are denied until `agents_memory` records it. Ambiguity must be resolved first; `agents_memory` is denied while the ambiguity gate is open.
+- `agents_memory` now accepts only a distilled conclusion or requirement in the model's own words (<=600 characters). It rejects longer text and transcript-like multi-line copies; raw user messages stay searchable through `agents_index` (`userLog`) and are labelled `raw-user-message` in search results.
+- The memory card distinguishes distilled LLM records from raw user-message summaries, and the compression denial messages tell the model to record a distilled memory before retrying.
+- Only a successful `agents_memory` result clears the record gate; a pending call or a failed call (for example a raw-text rejection) does not. The denial text now shows the required JSON single-call form, because JavaScript object literals with unquoted keys are rejected by the safe-call parser.
+- Add unit tests for the recall/record gates, ambiguity-before-record ordering, the distilled-memory limit, and the new card protocol.
+
+## 0.5.5
+
+- Clarification precedence is official `ask_user_question` first, then Deep PTC `ask_user`, then a normal text question. The guard no longer treats `ask_user` as the only ask path; the next non-ambiguous user message still clears the gate.
+- Treat rhetorical diagnostics such as "怎么还是……？" as questions, not as strong ambiguity; add a regression test for the exact phrasing.
+- Add a DSH client settings page. The Settings section shows read permission as read-only (DSH owns it) and edits the common Guard policies through the official configuration form. The same controls are available in the plugin row configuration page.
+- Add a client entry (dsh.client, ./client export) without importing client UI primitives or adding runtime dependencies.
+- Remove the compression-denial and legacy no-card switches from the settings page. Normal old sessions get a lazy index card. `denyCompress` and the no-card fallback are fixed internal invariants (always on), not user-facing policies.
+- Document that agents_verify reads through the DSH workspaceFiles service, not ctx.fs.
+
+## 0.5.4
+
+- Remove the guard's own read-path policy from agents_verify. read_file, list_dir, and grep now resolve, stat, read, and list through the DSH `workspaceFiles` service, so DSH owns path mapping, symlinks, and permission handling. There is no separate workspace/full setting in the guard.
+- If `workspaceFiles` is unavailable, agents_verify fails instead of falling back to direct node:fs reads.
+- Add guard tests that require reads to go through workspaceFiles and that a missing file service is rejected.
+
 ## 0.5.3
 
 - Move the generated index to the session-level contract path `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`; do not write `AGENT_CONTEXT_INDEX.md` in the workspace root. This follows the user's 2026-10-12 session-index rule in `~/.dsh/STRUCTURE.md`.

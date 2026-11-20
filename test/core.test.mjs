@@ -6,12 +6,16 @@ import {
   codeVerifies,
   decideAmbiguity,
   decideCompress,
+  decideRecall,
+  decideRecord,
   decideReasoning,
   shouldForceCompress,
   emptyState,
   hashCard,
   authorityFor,
   isAmbiguous,
+  isRecallIntent,
+  isRecordIntent,
   isReasoningQuestion,
   isAgentsVerifyRunCode,
   isAskUserRunCode,
@@ -21,6 +25,7 @@ import {
   openReasoningQuestions,
   resolveReasoningQuestion,
   isMutatingToolName,
+  memoryRecordProblem,
   mergeLlmEntries,
   normalizeConfig,
   redactSecrets,
@@ -114,18 +119,24 @@ assert.match(merged, /手工索引/);
 assert.match(merged, /dsh-agents-guard:begin/);
 const mergedAgain = upsertGeneratedBlock(merged, generated);
 assert.equal(mergedAgain, merged, 'second upsert must be idempotent');
-const cfg = normalizeConfig({ maxCardChars: 0, denyCompress: 'false' });
+const cfg = normalizeConfig({ maxCardChars: 0, denyCompress: 'false', legacyCompressWithoutCard: 'false' });
 assert.equal(cfg.maxCardChars, 4200);
-assert.equal(cfg.denyCompress, false);
+assert.equal(cfg.denyCompress, true);
+assert.equal(cfg.legacyCompressWithoutCard, true);
 assert.equal(normalizeConfig({ compressPressureRatio: 0.75 }).compressPressureRatio, 0.75);
 assert.equal(normalizeConfig({ compressPressureRatio: 1.5 }).compressPressureRatio, 0.8);
 
 assert.equal(isAmbiguous('用 A 还是 B？'), true);
 assert.equal(isAmbiguous('随便你决定'), true);
 assert.equal(isAmbiguous('能不能加测试？'), true);
+assert.equal(isAmbiguous('我并没有看到询问卡片，是否卡死？'), false);
+assert.equal(isAmbiguous('设置页为什么没有出现？'), false);
+assert.equal(isAmbiguous('等等你怎么还是在用会话搜索啊？我们弄得插件不就让你能回忆起来得嘛？'), false);
+assert.equal(isAmbiguous('是否要删除这个文件？'), true);
 assert.equal(isAmbiguous('把文件改成 A'), false);
 assert.equal(isAmbiguous('记录一下这个决定'), false);
 assert.equal(codeAsksUser('await tools.ask_user({})'), true);
+assert.equal(codeAsksUser('await tools.ask_user_question({})'), true);
 assert.equal(codeAsksUser('await tools.ask_user({}); await tools.write({})'), false);
 
 let amb = emptyState({ cwd: 'C:/work' });
@@ -133,8 +144,11 @@ amb = reduceEvent(amb, { type: 'turn/start', seq: 1, data: { turn: 1 } });
 amb = reduceEvent(amb, user(2, '用 A 还是 B？'));
 assert.ok(amb.ambiguitySeq > amb.clarifiedSeq);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, false);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'agents_memory', code: '', config: {} }).allow, false, 'do not record an ambiguous request');
 assert.equal(decideAmbiguity({ state: amb, toolName: 'ask_user', code: '', config: {} }).allow, true);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'ask_user_question', code: '', config: {} }).allow, true);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.ask_user({})', config: {} }).allow, true);
+assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.ask_user_question({})', config: {} }).allow, true);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'apply_patch', code: '', config: {} }).allow, false);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'terminal', code: '', config: {} }).allow, false);
@@ -152,6 +166,38 @@ assert.match(buildCard(amb, {}), /WAITING/);
 amb = reduceEvent(amb, user(4, '【回答】A'));
 assert.ok(amb.clarifiedSeq > amb.ambiguitySeq);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, true);
+
+// Recall-first and record-first gates: Guard's own functions must be used before fallback search or mutation.
+assert.equal(isRecallIntent('当前已经完成我和龙娘讨论中的所有问题修复了吗？'), true);
+assert.equal(isRecallIntent('把文件改成 A'), false);
+assert.equal(isRecordIntent('必须记住：先记录再压缩'), true);
+assert.equal(isRecordIntent('只读检查一下'), false);
+let pr = emptyState({ cwd: 'C:/work' });
+pr = reduceEvent(pr, { type: 'turn/start', seq: 1, data: { turn: 1 } });
+pr = reduceEvent(pr, user(10, '必须记住：先记录再压缩'));
+assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, false);
+assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, false);
+assert.equal(decideRecord({ state: pr, toolName: 'read', code: '', config: {} }).allow, true);
+assert.equal(decideRecord({ state: pr, toolName: 'agents_memory', code: '', config: {} }).allow, true);
+assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({"action":"add","kind":"requirement","text":"x"})', config: {} }).allow, true, 'one JSON memory call must be allowed while recording is due');
+assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({action:"add",kind:"requirement",text:"x"})', config: {} }).allow, false, 'non-JSON memory calls are not safe-gate calls');
+assert.match(buildCard(pr, {}), /优先协议/);
+assert.match(buildCard(pr, {}), /提炼/);
+assert.equal(memoryRecordProblem('提炼后的结论'), '');
+assert.match(memoryRecordProblem('x'.repeat(601)), /distill/);
+assert.match(memoryRecordProblem('a\nb\nc\nd\ne'), /distill/);
+pr = reduceEvent(pr, { type: 'tool/call', seq: 11, data: { callId: 'idx-1', name: 'agents_index', arguments: '{}' } });
+assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, true);
+pr = reduceEvent(pr, { type: 'tool/call', seq: 12, data: { callId: 'mem-1', name: 'agents_memory', arguments: JSON.stringify({ kind: 'requirement', text: 'x' }) } });
+assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, false, 'a pending memory call is not a successful record');
+pr = reduceEvent(pr, { type: 'tool/result', seq: 13, data: { message: { toolCallId: 'mem-1', content: [{ type: 'text', text: 'ok' }], isError: false } } });
+assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, true, 'a successful memory result clears the record gate');
+let failedMem = emptyState({ cwd: 'C:/work' });
+failedMem = reduceEvent(failedMem, { type: 'turn/start', seq: 20, data: { turn: 2 } });
+failedMem = reduceEvent(failedMem, user(21, '必须记录：先记录再压缩'));
+failedMem = reduceEvent(failedMem, { type: 'tool/call', seq: 22, data: { callId: 'mem-fail', name: 'agents_memory', arguments: JSON.stringify({ kind: 'requirement', text: 'x' }) } });
+failedMem = reduceEvent(failedMem, { type: 'tool/result', seq: 23, data: { error: { reason: 'validation failed' }, message: { toolCallId: 'mem-fail', content: [{ type: 'text', text: 'rejected' }], isError: true } } });
+assert.equal(decideRecord({ state: failedMem, toolName: 'write', code: '', config: {} }).allow, false, 'a failed memory result must not clear the record gate');
 
 let mem = emptyState({ cwd: 'C:/work' });
 mem = reduceEvent(mem, {
