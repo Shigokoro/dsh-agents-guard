@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Agents 守则守卫",
+    "description": "自动维护会话索引、记录模型提取的记忆，并在用户歧义或思考疑问未解决时阻断修改。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,9 @@
+- insert:
+    - id: agents-guard
+      name: '@local/dsh-agents-guard'
+      config:
+        denyCompress: true
+        writeIndex: true
+        ambiguityGate: true
+        reasoningGate: true
+        maxCardChars: 4200
