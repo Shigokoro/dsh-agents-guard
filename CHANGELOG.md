@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Move the generated index to the session-level contract path `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`; do not write `AGENT_CONTEXT_INDEX.md` in the workspace root. This follows the user's 2026-10-12 session-index rule in `~/.dsh/STRUCTURE.md`.
+- Load persisted LLM entries from the generated index block when the index tool runs, so entries survive a plugin reload even when the projection state is reset. Add `parseIndexMemory`.
+
 ## 0.5.2
 
 - Capture a single inner `agents_memory` call made through `run_code` in the outer tool/call record. The projection now persists the entry, so it survives a plugin reload instead of disappearing with the transient runtime store.
