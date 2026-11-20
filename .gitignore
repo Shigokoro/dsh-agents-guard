@@ -1,0 +1,11 @@
+# runtime / editor
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# plugin runtime output (never commit a user's session index)
+AGENT_CONTEXT_INDEX.md
+.dsh-agents-guard/

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Agents guard",
+    "description": "Maintains a session index, records model-extracted memory, and blocks mutation while a user ambiguity or a reasoning question is unresolved.",
+    "detail": "docs/DETAIL.md"
+  }
+}
