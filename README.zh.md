@@ -6,10 +6,10 @@
 
 - 从会话事件折叠用户要求/纠错、候选决策、未决项、工具失败和改动文件，写入 `AGENT_CONTEXT_INDEX.md`（保留手工内容）。
 - 每轮开始注入紧凑的“历史上下文卡”，明确标为历史上下文，不是新的用户指令。
-- `agents_memory` 记录 decision / verified / error / open / requirement / correction / assumption；verified/decision 应带 evidence，assumption 不等于用户确认。
+- `agents_memory` 记录 decision / verified / error / open / requirement / correction / assumption；verified/decision 应带 evidence，assumption 不等于用户确认。每条记录带 authority：user-confirmed / user-stated / tested / model-inferred / assumption。
 - 压缩前拦截：本轮索引卡未注入，或最新用户消息晚于索引卡时，`compress` 被拒绝。
-- 歧义闸门：强歧义用户消息触发，阻断 write/edit/pwsh/run_code/compress，直到 `ask_user` 或用户澄清。
-- 思考疑问闸门：assistant 推理中出现显式不确定/自问句时，阻断 write/edit/pwsh/compress 与非只读 run_code；成功的只读验证会解除，`ask_user` 也可解除。`agents_memory` 只记录，不参与解除。
+- 歧义闸门：强歧义用户消息触发，阻断 write/edit/pwsh/run_code/compress；调用 `ask_user` 只进入 WAITING，不会直接解除，需用户答复。
+- 思考疑问闸门：assistant 推理中出现显式不确定/自问句时，阻断 write/edit/pwsh/compress 与非只读 run_code；成功的只读验证会解除；`ask_user` 只进入 WAITING，不直接解除，仍需用户答复。`agents_memory` 只记录，不参与解除。
 - 回答卡消息（以 `【回答` 开头或包含 `→`）视为回答，不触发歧义闸门。
 - 对 GitHub PAT、经典 token 和 Bearer token 做脱敏：写入索引、卡片和 agents_memory 输出前替换为占位符。
 

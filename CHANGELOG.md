@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- `ask_user` now moves ambiguity and reasoning gates to WAITING; it no longer clears them. The gates stay blocked until a user answer (or, for reasoning, a successful read-only verification).
+- `agents_memory` entries carry an authority level: user-confirmed, user-stated, tested, model-inferred, or assumption. The card and Markdown index show it.
+
 ## 0.3.2
 
 - Redacts GitHub PATs, classic tokens, and Bearer tokens before storing or rendering the session index, cards, and agents_memory entries.

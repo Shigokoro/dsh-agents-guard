@@ -9,6 +9,7 @@ import {
   decideReasoning,
   emptyState,
   hashCard,
+  authorityFor,
   isAmbiguous,
   isReasoningQuestion,
   normalizeConfig,
@@ -113,6 +114,11 @@ amb = reduceEvent(amb, {
   seq: 3,
   data: { callId: 'ask-1', name: 'run_code', arguments: JSON.stringify({ code: 'await tools.ask_user({})' }) },
 });
+assert.ok(amb.ambiguityAskedSeq >= amb.ambiguitySeq);
+assert.equal(amb.clarifiedSeq, 0, 'ask_user must not clear ambiguity before an answer');
+assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, false, 'writing must remain blocked in WAITING');
+assert.match(buildCard(amb, {}), /WAITING/);
+amb = reduceEvent(amb, user(4, '【回答】A'));
 assert.ok(amb.clarifiedSeq > amb.ambiguitySeq);
 assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, true);
 
@@ -123,19 +129,27 @@ mem = reduceEvent(mem, {
   data: {
     callId: 'mem-1',
     name: 'agents_memory',
-    arguments: JSON.stringify({ action: 'add', kind: 'decision', text: '采用插件方案', source: 'user', evidence: 'm00829' }),
+    arguments: JSON.stringify({ action: 'add', kind: 'decision', text: '采用插件方案', source: 'user', evidence: 'm00829', authority: 'user-confirmed' }),
   },
 });
 assert.equal(mem.pendingCalls['mem-1'].memory.kind, 'decision');
+assert.equal(mem.pendingCalls['mem-1'].memory.authority, 'user-confirmed');
 mem = reduceEvent(mem, {
   type: 'tool/result',
   seq: 11,
   data: { message: { toolCallId: 'mem-1', content: [], isError: false } },
 });
 assert.equal(mem.llmEntries.length, 1);
+assert.equal(mem.llmEntries[0].authority, 'user-confirmed');
 assert.match(buildCard(mem, {}), /LLM 记录/);
+assert.match(buildCard(mem, {}), /decision\|user-confirmed/);
 assert.match(renderIndexMarkdown(mem, 's', {}), /采用插件方案/);
 
+assert.equal(authorityFor('model', 'decision', ''), 'model-inferred');
+assert.equal(authorityFor('user', 'requirement', ''), 'user-stated');
+assert.equal(authorityFor('tool', 'verified', ''), 'tested');
+assert.equal(authorityFor('model', 'assumption', ''), 'assumption');
+assert.equal(authorityFor('model', 'verified', 'user-confirmed'), 'user-confirmed');
 assert.equal(isReasoningQuestion('我不确定这个字段是否存在'), true);
 assert.equal(isReasoningQuestion('是否应该用 A？'), true);
 assert.equal(isReasoningQuestion('函数返回 3。'), false);
@@ -250,6 +264,11 @@ reas4 = reduceEvent(reas4, {
 assert.equal(reas4.reasoningClarifiedSeq, 0, 'failed verification must not clear');
 assert.equal(decideReasoning({ state: reas4, toolName: 'write', code: '', config: {} }).allow, false);
 reas2 = reduceEvent(reas2, { type: 'tool/call', seq: 43, data: { callId: 'ask-2', name: 'ask_user', arguments: '{}' } });
-assert.ok(reas2.reasoningClarifiedSeq > reas2.reasoningSeq);
+assert.equal(reas2.reasoningClarifiedSeq, 0, 'ask_user must not clear reasoning before an answer');
+assert.ok(reas2.reasoningAskedSeq >= reas2.reasoningSeq);
+assert.equal(decideReasoning({ state: reas2, toolName: 'write', code: '', config: {} }).allow, false);
+assert.match(buildCard(reas2, {}), /WAITING/);
+reas2 = reduceEvent(reas2, user(44, '【回答】已验证'));
+assert.equal(decideReasoning({ state: reas2, toolName: 'write', code: '', config: {} }).allow, true);
 
 console.log('core tests passed');
