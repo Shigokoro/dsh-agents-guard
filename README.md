@@ -11,6 +11,7 @@ A Host-only DSH bundle that maintains a session index, accepts model-written mem
 - Registers a tool guard for compress. The guard denies the call when the card was not injected for the current turn, or when the latest user message arrived after the injected card.
 - Registers an ambiguity gate. When the latest user message is a strong ambiguity signal, write, edit, pwsh, run_code, and compress are denied until the model calls ask_user, or the user clarifies. run_code is allowed only when its code asks the user and does not also write or execute.
 - Registers a reasoning gate. When the assistant's own reasoning contains an explicit unresolved question or uncertainty, write, edit, pwsh, compress, and non-read-only run_code are denied. A successful read-only verification call (read/grep/web_search or read-only run_code) clears the gate; ask_user also clears it. agents_memory records decisions and evidence but does not clear the gate.
+- Redacts GitHub PATs, classic tokens, and Bearer tokens before storing index entries and rendering cards or agents_memory output.
 
 ## Install
 

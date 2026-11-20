@@ -11,6 +11,7 @@
 - 歧义闸门：强歧义用户消息触发，阻断 write/edit/pwsh/run_code/compress，直到 `ask_user` 或用户澄清。
 - 思考疑问闸门：assistant 推理中出现显式不确定/自问句时，阻断 write/edit/pwsh/compress 与非只读 run_code；成功的只读验证会解除，`ask_user` 也可解除。`agents_memory` 只记录，不参与解除。
 - 回答卡消息（以 `【回答` 开头或包含 `→`）视为回答，不触发歧义闸门。
+- 对 GitHub PAT、经典 token 和 Bearer token 做脱敏：写入索引、卡片和 agents_memory 输出前替换为占位符。
 
 ## 安装
 

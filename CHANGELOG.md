@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- Redacts GitHub PATs, classic tokens, and Bearer tokens before storing or rendering the session index, cards, and agents_memory entries.
+- Adds the standalone GitHub repository layout and CI workflow to the initial upload.
+
 ## 0.3.1
 
 - Read-only verification clears the reasoning gate; `agents_memory` records evidence but does not clear it.
