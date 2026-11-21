@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.8.0
+
+- Add context-continuity support. `agents_task` accepts an ordered `steps` plan; after each completed step, `agents_handoff action=save` records `step`, `next`, `preserve`, `discard`, and `risks`. The step-boundary handoff is the primary path; compression at the boundary keeps the task/goal, scope, active change and invariants, checks, recovery baseline, open questions, and next step.
+- Add `continuityGate` (default true), `continuityMaxChars` (default 1600, range 300-4000), `continuityFile` (default `AGENT_CONTINUITY.md`), and `writeContinuity` (default true). A missing, stale (newer user message), or incomplete handoff denies compression below the context threshold; at or above the existing `compressPressureRatio` (0.8) the host projection is allowed as the emergency fallback. There is no separate 70% threshold.
+- The continuity card is injected on turn start and after compression, with host-projected fields and model-distilled notes clearly separated. The protocol is injected in the system prompt, the card, and the one-time threshold reminder rather than only in documentation.
+- Add live task and handoff overlays so `agents_task close` followed by a write in the same `run_code` program cannot bypass `taskGate`, and a handoff saved in the same program is visible to `compress` before the projection catches up. Both overlays are removed when the projection has newer data.
+- Harden `latestChange` path matching for relative/absolute paths, `..`, and parent-directory coverage; a verified newest change no longer falls back to an older planned change. `decideRecovery` rejects a target with no planned/applied change instead of accepting an unrelated baseline.
+- Add continuity, live-overlay, task path/lifecycle, and recovery-binding regressions. The settings page exposes `continuityGate`, `writeContinuity`, and `continuityMaxChars`; `cordis.patch.yml` carries the defaults. `agents_guard_dev self_test` grows to 14 cases with a continuity scenario.
+- Add a compatibility matrix (`docs/COMPATIBILITY.md`) and graceful degradation for optional dependencies. With no context-compression plugin, compression-only gates never run and the index/memory/task/ledger/handoff tools remain available; without `tokenMeter`, the 80% reminder and pressure exemption are inactive and step-boundary handoffs are manual. `tools.guard` is optional (index tools load, gates disabled and logged), `agents_guard_dev status` reports settings/tokenMeter/workspaceFiles/llm/toolsGuard capabilities, and a regression confirms continuity/index gates never affect ordinary writes.
+
+## 0.7.1
+
+
+- Fix `recoveryGate` binding: a recorded baseline now only authorizes the specific planned change (`changeId`) that covers the target. A baseline from another change no longer passes the gate. The guard passes `toolArgs` into `decideRecovery` so the target is resolved correctly, and a regression test covers the mismatch.
+- Document the binding rule in README, README.zh, and DETAIL.
+
+## 0.7.0
+
+- Add the six review modules as opt-in gates, all default false so existing sessions keep their behavior: task authorization (`taskGate`), structured evidence (`evidenceGate`), impact/invariants (`impactGate`), verification (`verificationGate`), recovery baseline (`recoveryGate`), and index integrity (`indexGate`).
+- Add `agents_evidence`: add/list/get a structured claim with source, mechanism, conditions, result, positive control, and observed/contradicted status. `verified` is rejected from the model; host-derived verification remains separate.
+- Add `agents_change`: plan/status/apply/verify. A plan records the target, direct/indirect impact, at least one explicit invariant, and the verification plan; `impactGate` requires that plan before protected mutations.
+- Add `agents_check`: add/status/record a check tied to a change. `verificationGate` requires at least one recorded pass before `agents_change action=verify`.
+- Add `agents_recovery`: baseline/status/rollback/verify. `recoveryGate` requires a recorded baseline bound to the current change before high-impact writes; baseline is a ledger entry, not an automatic backup.
+- Add `agents_index action=audit` and `indexGate`: compression requires a recent audit with status pass. Audit reports which required sections are empty.
+- Projection state v4 now carries task, authorization, evidence, changes, checks, recovery, and indexAudit. The settings page exposes all six gate toggles.
+- Harden projection persistence: ledger entries include a `text` field, so `addBounded` no longer silently drops changes/checks/recovery. Add projection tests for all ledgers and the audit result.
+- `self_test` grows to 13 deterministic cases, including impact/recovery/verification/index fail-closed behavior.
+
+## 0.6.1
+
+- Add developer-mode test harness `agents_guard_dev` (requires `developerMode=true`): `status` reads the live projection/config summary, `self_test` runs 11 deterministic gate cases, `simulate` evaluates a named scenario without touching real state, and `probe_write` verifies a real temporary write (created under `.tmp/guard-dev` and deleted immediately). The harness never mutates a session projection, the Markdown index, or the reasoning-state file; `probe_write` is the only mutation and is confined to a generated test file.
+- Fix the settings-page `maxReasoningQuestions` regression: `readDraft()` omitted the field, so saving wrote `null`. It now defaults to 8, validates 1–64, and the profile value was repaired. Add client and core regression checks.
+- Add task authorization (state v4): `agents_task start` records a model proposal, `confirm` activates it only when the latest user message is a confirmation, and `close` closes it. `taskGate` (default false, settings-page toggle) requires an active task and a matching path scope for write/edit/pwsh/non-read-only run_code/plugin_manager; proposals are never treated as authorization. The card shows the task status. The check is heuristic, not a security boundary.
+- Recognize PTC calls inside run_code whether they use JSON or an ordinary JavaScript object literal, including a `return await` prefix and calls embedded in short multi-statement snippets. This fixes task/memory calls that previously executed but never updated the projection. `self_test` grows to 12 cases with a task scenario.
+
+## 0.6.0
+
+- Add an independent reasoning-risk gate on top of the question gate: repeated reasoning without new evidence, repeated tool signatures, a completed operation being repeated, explicit constraint conflicts, and self-reported loop/drift can open a risk. When a risk is open, mutating tools are denied until the model emits a truthful `GUARD_STATE`; read-only checks and `agents_verify` remain available. An optional independent LLM review runs once per risk and can clear or confirm it; failure to obtain a review is configurable (`riskReviewFailure`, default `allow`) so the gate cannot self-lock.
+- Store only a distilled `GUARD_SUMMARY` (`goal`, `decisions`, `uncertainties`, `next`) from reasoning. Raw reasoning is never persisted, and only the summary's explicit uncertainties can become open questions. This replaces the old keyword scan of the full reasoning stream.
+- Add two-layer operation memory: `operationKeywords` keeps a small long-lived keyword summary with counts, while `recentMemory` keeps detailed recent operations/thoughts with a configurable cap. The card shows keywords first and then the most recent details.
+- Add a reasoning projection state migration (stateVersion 4); old ambiguity risks and old reasoning questions are cleared instead of blocking a fresh session. Resolving the last ambiguity question also clears the associated risk.
+- Make settings take effect without a reload: the Host reads the live `settings.describe()` value on every guard call and refreshes on `settings/changed`, `loader/volatile-update`, and `app-boot/config-reload`; `developerMode` toggled in the settings page changes the next guard call.
+- Add the settings-page controls for the new policies: `developerMode`, `recallGate`, `recordGate`, `reasoningRiskGate`, `semanticReview`, `writeReasoningState`, `loopThreshold`, `toolRepeatThreshold`, `memoryTextMax`, `recentMemoryMax`, and `maxReasoningQuestions`.
+- Fix the client duplicate-factory crash by ignoring only an already-registered bundle factory; fix `agents_verify` to use the `workspaceFiles.readBytes()` payload; resolve questions from a successful `agents_verify` even when the outer call has no `callId`.
+
+## 0.5.8
+
+- Add `agents_verify` batch resolution: pass `questionIds` to resolve a whole question list with one read-only verification; the outer `run_code` projection carries every ID, and one success clears all listed questions. Unknown IDs are returned in `missingIds`.
+- Add developer mode (`developerMode`, default false): when enabled, all guard gates are bypassed for regression testing; it does not bypass DSH permissions or index maintenance. The settings page exposes the toggle.
+- Narrow the reasoning-question detector to explicit questions: a bare planning phrase or a normal English sentence no longer becomes a gate; legacy non-question entries are ignored by the gate.
+
+## 0.5.7
+
+- Remove the user-message ambiguity gate. A normal question is no longer classified as ambiguity; the plugin only tracks unresolved questions in the model's own reasoning. Direct read-only tools are never blocked by that gate.
+- Replace the one-call `run_code` allowlist with mutation-aware classification: multiple read-only calls are allowed, while code containing `tools.write`/`edit`/`pwsh`/`terminal`/`plugin_manager`, fs write/rename/delete/mkdir, or child-process APIs remains blocked.
+- Add `memoryTextMax` (default 600, range 100–2000) and apply it to `agents_memory`; expose it on the settings page together with `recallGate` and `recordGate`, and remove the ambiguity controls.
+- Add regression tests for user questions not gating writes, multi-statement read-only `run_code`, mutating `run_code`, and the configurable memory limit.
+
 ## 0.5.6
 
 - Add a recall-first gate: when a user message asks about earlier work, requirements, decisions, corrections, or context, `session_search` and the other fallback search tools are denied until `agents_index` has run for this turn. The card and system prompt name `agents_index` as the first recall tool.

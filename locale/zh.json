@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Agents 守则守卫",
-    "description": "自动维护会话索引、记录模型提取的记忆，并在用户歧义或思考疑问未解决时阻断修改。",
+    "description": "自动维护会话索引、记录提炼记忆、保存压缩接续并阻断未解决的写入。",
     "detail": "docs/DETAIL.md"
   }
 }

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Agents guard",
-    "description": "Maintains a session index, records model-extracted memory, and blocks mutation while a user ambiguity or a reasoning question is unresolved.",
+    "description": "Maintains a session index, records distilled memory, preserves a handoff across compression, and blocks unresolved writes.",
     "detail": "docs/DETAIL.md"
   }
 }

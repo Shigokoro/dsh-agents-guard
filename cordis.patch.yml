@@ -2,10 +2,30 @@
     - id: agents-guard
       name: '@local/dsh-agents-guard'
       config:
+        developerMode: false
         denyCompress: true
         compressPressureRatio: 0.8
         writeIndex: true
-        ambiguityGate: true
+        recallGate: true
+        recordGate: true
+        taskGate: false
+        continuityGate: true
+        continuityMaxChars: 1600
+        continuityFile: AGENT_CONTINUITY.md
+        writeContinuity: true
+        evidenceGate: false
+        maxEvidence: 20
+        impactGate: false
+        verificationGate: false
+        recoveryGate: false
+        indexGate: false
         reasoningGate: true
+        reasoningRiskGate: true
+        semanticReview: true
+        writeReasoningState: true
+        loopThreshold: 2
+        toolRepeatThreshold: 3
+        memoryTextMax: 600
+        recentMemoryMax: 12
         maxReasoningQuestions: 8
         maxCardChars: 4200

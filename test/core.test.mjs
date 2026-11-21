@@ -1,19 +1,43 @@
 import assert from 'node:assert/strict';
 import {
   buildCard,
+  buildRiskReviewPrompt,
   codeAsksUser,
   codeIsReadOnly,
   codeVerifies,
-  decideAmbiguity,
+  safeRunCodeCall,
   decideCompress,
   decideRecall,
   decideRecord,
   decideReasoning,
+  decideRisk,
+  decideTask,
+  decideContinuity,
+  buildContinuity,
+  continuityStatus,
+  handoffRecordProblem,
+  handoffEntryFrom,
+  decideEvidence,
+  decideImpact,
+  decideRecovery,
+  decideVerification,
+  decideIndexGate,
+  changeRecordProblem,
+  checkRecordProblem,
+  recoveryRecordProblem,
+  evidenceRecordProblem,
+  isTaskConfirmation,
+  isTaskDenial,
+  emptyReasoningState,
+  parseGuardState,
+  parseRiskReview,
+  reasoningSimilarity,
+  reduceReasoningEvent,
+  renderReasoningState,
   shouldForceCompress,
   emptyState,
   hashCard,
   authorityFor,
-  isAmbiguous,
   isRecallIntent,
   isRecordIntent,
   isReasoningQuestion,
@@ -21,6 +45,7 @@ import {
   isAskUserRunCode,
   isSafeGateRunCode,
   agentsVerifyQuestionId,
+  agentsVerifyQuestionIds,
   extractReasoningQuestions,
   openReasoningQuestions,
   resolveReasoningQuestion,
@@ -30,6 +55,8 @@ import {
   normalizeConfig,
   redactSecrets,
   reasoningTextOf,
+  runGuardSelfTest,
+  simulateGuardScenario,
   reduceEvent,
   renderIndexMarkdown,
   upsertGeneratedBlock,
@@ -41,6 +68,10 @@ function user(seq, text) {
 
 function injectedUser(seq, text) {
   return { type: 'user/message', seq, data: { source: { kind: 'plugin:dsh-agents-guard' }, content: [{ type: 'text', text }] } };
+}
+
+function summaryReasoning(uncertainties, prefix = '') {
+  return prefix + 'GUARD_SUMMARY ' + JSON.stringify({ goal: 'unit test', uncertainties });
 }
 
 let state = emptyState({ cwd: 'C:/work' });
@@ -126,46 +157,42 @@ assert.equal(cfg.legacyCompressWithoutCard, true);
 assert.equal(normalizeConfig({ compressPressureRatio: 0.75 }).compressPressureRatio, 0.75);
 assert.equal(normalizeConfig({ compressPressureRatio: 1.5 }).compressPressureRatio, 0.8);
 
-assert.equal(isAmbiguous('用 A 还是 B？'), true);
-assert.equal(isAmbiguous('随便你决定'), true);
-assert.equal(isAmbiguous('能不能加测试？'), true);
-assert.equal(isAmbiguous('我并没有看到询问卡片，是否卡死？'), false);
-assert.equal(isAmbiguous('设置页为什么没有出现？'), false);
-assert.equal(isAmbiguous('等等你怎么还是在用会话搜索啊？我们弄得插件不就让你能回忆起来得嘛？'), false);
-assert.equal(isAmbiguous('是否要删除这个文件？'), true);
-assert.equal(isAmbiguous('把文件改成 A'), false);
-assert.equal(isAmbiguous('记录一下这个决定'), false);
+assert.equal(codeIsReadOnly('await tools.read({"file_path":"a"})'), true);
+assert.equal(codeIsReadOnly('const a = await tools.read({"file_path":"a"}); const b = await tools.read({"file_path":"b"});'), true, 'multiple read calls are still read-only');
+assert.equal(codeIsReadOnly('await tools.read({}); await tools.write({})'), false);
+assert.equal(codeIsReadOnly('await tools.read({}); await tools.edit({})'), false);
+assert.equal(codeIsReadOnly('await tools.read({}); await tools.plugin_manager({})'), false);
 assert.equal(codeAsksUser('await tools.ask_user({})'), true);
 assert.equal(codeAsksUser('await tools.ask_user_question({})'), true);
 assert.equal(codeAsksUser('await tools.ask_user({}); await tools.write({})'), false);
 
-let amb = emptyState({ cwd: 'C:/work' });
-amb = reduceEvent(amb, { type: 'turn/start', seq: 1, data: { turn: 1 } });
-amb = reduceEvent(amb, user(2, '用 A 还是 B？'));
-assert.ok(amb.ambiguitySeq > amb.clarifiedSeq);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, false);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'agents_memory', code: '', config: {} }).allow, false, 'do not record an ambiguous request');
-assert.equal(decideAmbiguity({ state: amb, toolName: 'ask_user', code: '', config: {} }).allow, true);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'ask_user_question', code: '', config: {} }).allow, true);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.ask_user({})', config: {} }).allow, true);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.ask_user_question({})', config: {} }).allow, true);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'apply_patch', code: '', config: {} }).allow, false);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'terminal', code: '', config: {} }).allow, false);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'read', code: '', config: {} }).allow, true);
-assert.equal(amb.requirements[0].authority, 'user-stated');
-amb = reduceEvent(amb, {
-  type: 'tool/call',
+// A user question is not an ambiguity gate. Only unresolved reasoning questions gate writes.
+let questions = emptyState({ cwd: 'C:/work' });
+questions = reduceEvent(questions, { type: 'turn/start', seq: 1, data: { turn: 1 } });
+questions = reduceEvent(questions, user(2, '用 A 还是 B？'));
+assert.equal(questions.ambiguitySeq, undefined);
+assert.equal(questions.lastUserSeq, 2);
+assert.equal(questions.requirements[0].authority, 'user-stated');
+assert.equal(decideReasoning({ state: questions, toolName: 'write', code: '', config: {} }).allow, true, 'a user question alone must not block writes');
+assert.equal(decideReasoning({ state: questions, toolName: 'read', code: '', config: {} }).allow, true);
+
+const readOnlyCode = 'const a = await tools.read({"file_path":"a"}); const b = await tools.read({"file_path":"b"});';
+let gate = emptyState({ cwd: 'C:/work' });
+gate = reduceEvent(gate, {
+  type: 'assistant/message',
   seq: 3,
-  data: { callId: 'ask-1', name: 'run_code', arguments: JSON.stringify({ code: 'await tools.ask_user({})' }) },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定 A 是否存在。']) }] } },
 });
-assert.ok(amb.ambiguityAskedSeq >= amb.ambiguitySeq);
-assert.equal(amb.clarifiedSeq, 0, 'ask_user must not clear ambiguity before an answer');
-assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, false, 'writing must remain blocked in WAITING');
-assert.match(buildCard(amb, {}), /WAITING/);
-amb = reduceEvent(amb, user(4, '【回答】A'));
-assert.ok(amb.clarifiedSeq > amb.ambiguitySeq);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'write', code: '', config: {} }).allow, true);
+assert.equal(decideReasoning({ state: gate, toolName: 'run_code', code: readOnlyCode, config: {} }).allow, true, 'multi-statement read-only run_code must pass the reasoning gate');
+assert.equal(decideReasoning({ state: gate, toolName: 'run_code', code: 'await tools.read({}); await tools.write({})', config: {} }).allow, false, 'mutating run_code must stay blocked');
+assert.equal(decideReasoning({ state: gate, toolName: 'read', code: '', config: {} }).allow, true, 'direct reads are allowed while reasoning is unresolved');
+
+let recording = emptyState({ cwd: 'C:/work' });
+recording = reduceEvent(recording, { type: 'turn/start', seq: 4, data: { turn: 2 } });
+recording = reduceEvent(recording, user(5, '必须记住：先记录再压缩'));
+assert.equal(decideRecord({ state: recording, toolName: 'run_code', code: readOnlyCode, config: {} }).allow, true, 'read-only run_code must not be blocked by the record gate');
+assert.equal(decideRecord({ state: recording, toolName: 'read', code: '', config: {} }).allow, true);
+assert.equal(decideRecord({ state: recording, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false, 'mutating run_code must still require a memory record');
 
 // Recall-first and record-first gates: Guard's own functions must be used before fallback search or mutation.
 assert.equal(isRecallIntent('当前已经完成我和龙娘讨论中的所有问题修复了吗？'), true);
@@ -177,16 +204,20 @@ pr = reduceEvent(pr, { type: 'turn/start', seq: 1, data: { turn: 1 } });
 pr = reduceEvent(pr, user(10, '必须记住：先记录再压缩'));
 assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, false);
 assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, false);
-assert.match(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).reason, /JSON/);
+assert.match(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).reason, /agents_memory/);
 assert.equal(decideRecord({ state: pr, toolName: 'read', code: '', config: {} }).allow, true);
 assert.equal(decideRecord({ state: pr, toolName: 'agents_memory', code: '', config: {} }).allow, true);
 assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({"action":"add","kind":"requirement","text":"x"})', config: {} }).allow, true, 'one JSON memory call must be allowed while recording is due');
-assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({action:"add",kind:"requirement",text:"x"})', config: {} }).allow, false, 'non-JSON memory calls are not safe-gate calls');
+assert.equal(decideRecord({ state: pr, toolName: 'run_code', code: 'await tools.agents_memory({action:"add",kind:"requirement",text:"x"})', config: {} }).allow, true, 'a single JavaScript object-literal memory call is safe');
 assert.match(buildCard(pr, {}), /优先协议/);
 assert.match(buildCard(pr, {}), /提炼/);
 assert.equal(memoryRecordProblem('提炼后的结论'), '');
 assert.match(memoryRecordProblem('x'.repeat(601)), /distill/);
+assert.equal(memoryRecordProblem('x'.repeat(601), 700), '');
+assert.match(memoryRecordProblem('x'.repeat(701), 700), /700/);
 assert.match(memoryRecordProblem('a\nb\nc\nd\ne'), /distill/);
+assert.equal(normalizeConfig({ memoryTextMax: 50 }).memoryTextMax, 600);
+assert.equal(normalizeConfig({ memoryTextMax: 700 }).memoryTextMax, 700);
 pr = reduceEvent(pr, { type: 'tool/call', seq: 11, data: { callId: 'idx-1', name: 'agents_index', arguments: '{}' } });
 assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, true);
 pr = reduceEvent(pr, { type: 'tool/call', seq: 12, data: { callId: 'mem-1', name: 'agents_memory', arguments: JSON.stringify({ kind: 'requirement', text: 'x' }) } });
@@ -246,7 +277,6 @@ assert.equal(codeVerifies('await tools.read({})'), true);
 assert.equal(codeVerifies('await tools.agents_memory({})'), false);
 assert.equal(codeVerifies('await tools.plugin_manager({})'), false);
 assert.equal(isReasoningQuestion('needs similar independent repo scaffolding'), false);
-assert.equal(isAmbiguous('【回答 · X】 1. 是否继续？ → A'), false);
 assert.match(reasoningTextOf({ message: { content: [{ type: 'reasoning', text: '思考内容' }] } }), /思考内容/);
 
 // Per-question reasoning gate: each question gets an ID and only agents_verify resolves it.
@@ -254,7 +284,7 @@ let reas = emptyState({ cwd: 'C:/work' });
 reas = reduceEvent(reas, {
   type: 'assistant/message',
   seq: 30,
-  data: { message: { content: [{ type: 'reasoning', text: '我不确定 A 是否存在。' }] } },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定 A 是否存在。']) }] } },
 });
 assert.equal(openReasoningQuestions(reas).length, 1);
 const qA = openReasoningQuestions(reas)[0];
@@ -302,7 +332,7 @@ let multi = emptyState({ cwd: 'C:/work' });
 multi = reduceEvent(multi, {
   type: 'assistant/message',
   seq: 40,
-  data: { message: { content: [{ type: 'reasoning', text: '我不确定 A 是否存在。\n是否应该用 B？' }] } },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定 A 是否存在。', '是否应该用 B？']) }] } },
 });
 assert.equal(openReasoningQuestions(multi).length, 2);
 const [q1, q2] = openReasoningQuestions(multi);
@@ -339,7 +369,7 @@ let failed = emptyState({ cwd: 'C:/work' });
 failed = reduceEvent(failed, {
   type: 'assistant/message',
   seq: 50,
-  data: { message: { content: [{ type: 'reasoning', text: '我不确定 C 是否存在。' }] } },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定 C 是否存在。']) }] } },
 });
 const qC = openReasoningQuestions(failed)[0];
 failed = reduceEvent(failed, {
@@ -360,7 +390,7 @@ let waiting = emptyState({ cwd: 'C:/work' });
 waiting = reduceEvent(waiting, {
   type: 'assistant/message',
   seq: 60,
-  data: { message: { content: [{ type: 'reasoning', text: '我不确定 D 是否存在。是否应该用 E？' }] } },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定 D 是否存在。', '是否应该用 E？']) }] } },
 });
 const waitingIds = openReasoningQuestions(waiting).map((item) => item.id);
 assert.equal(waitingIds.length, 2);
@@ -384,21 +414,22 @@ waiting = reduceEvent(waiting, {
 assert.equal(openReasoningQuestions(waiting).length, 0);
 assert.equal(decideReasoning({ state: waiting, toolName: 'write', code: '', config: {} }).allow, true);
 
-// Legacy sessions without reasoningQuestions still work with one synthetic ID.
+// Version-1 sessions must stop resurrecting raw reasoning questions.
 let legacy = emptyState({ cwd: 'C:/work' });
+legacy.version = 1;
 legacy.reasoningSeq = 70;
 legacy.reasoningText = '我不确定 legacy 是否存在。';
 legacy.reasoningClarifiedSeq = 0;
 legacy.reasoningAskedSeq = 0;
-const legacyQuestion = openReasoningQuestions(legacy)[0];
-assert.equal(legacyQuestion.id, 'legacy-70');
-assert.equal(decideReasoning({ state: legacy, toolName: 'write', code: '', config: {} }).allow, false);
-legacy = resolveReasoningQuestion(legacy, legacyQuestion.id, 71, 'legacy checked');
+assert.equal(openReasoningQuestions(legacy).length, 0);
+legacy = reduceEvent(legacy, user(71, '继续'));
+assert.equal(legacy.version, 4);
+assert.equal(legacy.reasoningSeq, 0);
+assert.equal(legacy.reasoningText, '');
 assert.equal(openReasoningQuestions(legacy).length, 0);
 assert.equal(decideReasoning({ state: legacy, toolName: 'write', code: '', config: {} }).allow, true);
 
 assert.equal(extractReasoningQuestions('我不确定 A。是否用 B？').length, 2);
-assert.equal(decideAmbiguity({ state: amb, toolName: 'agents_verify', code: '', config: {} }).allow, true);
 
 // Strict run_code gateways: only one exact agents_verify or ask_user call is allowed.
 const verifyCode = 'await tools.agents_verify({"questionId":"q-1","op":"read_file","path":"a.txt"})';
@@ -413,13 +444,14 @@ let gateway = emptyState({ cwd: 'C:/work' });
 gateway = reduceEvent(gateway, {
   type: 'assistant/message',
   seq: 80,
-  data: { message: { content: [{ type: 'reasoning', text: '我不确定这个字段是否存在。' }] } },
+  data: { message: { content: [{ type: 'reasoning', text: summaryReasoning(['我不确定这个字段是否存在。']) }] } },
 });
 assert.equal(decideReasoning({ state: gateway, toolName: 'run_code', code: verifyCode, config: {} }).allow, true);
 assert.equal(decideReasoning({ state: gateway, toolName: 'run_code', code: askCode, config: {} }).allow, true);
 assert.equal(decideReasoning({ state: gateway, toolName: 'run_code', code: 'await tools.read({})', config: {} }).allow, true);
 assert.equal(decideReasoning({ state: gateway, toolName: 'run_code', code: 'await tools.write({})', config: {} }).allow, false);
 assert.equal(isSafeGateRunCode('await tools.read({"file_path":"a.txt"})'), true);
+assert.equal(isSafeGateRunCode('return await tools.agents_task({"action":"start","goal":"x"})'), true, 'PTC return-prefixed calls must be recognized');
 assert.equal(isSafeGateRunCode('await tools.read({"file_path":"a.txt"}); await tools.write({})'), false);
 assert.equal(isSafeGateRunCode('await tools.write({"file_path":"a.txt","content":"x"})'), false);
 gateway = reduceEvent(gateway, {
@@ -437,7 +469,7 @@ let outer = emptyState({ cwd: "C:/work" });
 outer = reduceEvent(outer, {
   type: "assistant/message",
   seq: 90,
-  data: { message: { content: [{ type: "reasoning", text: "我不确定 E 是否存在。" }] } },
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 E 是否存在。"]) }] } },
 });
 const outerQ = openReasoningQuestions(outer)[0];
 const outerCode = "await tools.agents_verify(" + JSON.stringify({ questionId: outerQ.id, op: "read_file", path: "a.txt" }) + ")";
@@ -462,7 +494,7 @@ let persisted = emptyState({ cwd: "C:/work" });
 persisted = reduceEvent(persisted, {
   type: "assistant/message",
   seq: 100,
-  data: { message: { content: [{ type: "reasoning", text: "我不确定 F 是否存在。" }] } },
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 F 是否存在。"]) }] } },
 });
 const roundTrip = JSON.parse(JSON.stringify(persisted));
 assert.equal(openReasoningQuestions(roundTrip).length, 1, "question state must survive JSON persistence");
@@ -470,6 +502,9 @@ assert.equal(decideReasoning({ state: roundTrip, toolName: "write", code: "", co
 const roundTripQuestion = openReasoningQuestions(roundTrip)[0];
 const resolvedRoundTrip = resolveReasoningQuestion(roundTrip, roundTripQuestion.id, 101, "checked after restart");
 assert.equal(openReasoningQuestions(resolvedRoundTrip).length, 0);
+const resolvedWithRisk = Object.assign({}, roundTrip, { risk: { id: "risk-ambiguity", seq: 99, kind: "ambiguity", reason: "old ambiguity", required: true, review: "error" } });
+const clearedRisk = resolveReasoningQuestion(resolvedWithRisk, roundTripQuestion.id, 101, "checked");
+assert.equal(clearedRisk.risk, null, "resolving the last ambiguity question must clear its stale risk");
 
 const memoryCode = 'await tools.agents_memory(' + JSON.stringify({ action: 'add', kind: 'verified', text: 'persisted memory', evidence: 'unit' }) + ')';
 let memoryState = emptyState({ cwd: 'C:/work' });
@@ -488,5 +523,366 @@ assert.equal(memoryState.llmEntries.length, 1, 'successful inner memory must ent
 assert.equal(memoryState.llmEntries[0].text, 'persisted memory');
 const memoryAfterRestart = JSON.parse(JSON.stringify(memoryState));
 assert.equal(memoryAfterRestart.llmEntries.length, 1, 'memory must survive JSON persistence across a reload');
+
+// Developer mode must bypass every gate while keeping read-only behavior testable.
+assert.equal(normalizeConfig({ developerMode: "true" }).developerMode, true);
+assert.equal(normalizeConfig({ developerMode: "false" }).developerMode, false);
+assert.equal(decideReasoning({ state: gate, toolName: "write", code: "", config: { developerMode: true } }).allow, true, "developer mode bypasses the reasoning gate");
+assert.equal(decideRecord({ state: recording, toolName: "write", code: "", config: { developerMode: true } }).allow, true, "developer mode bypasses the record gate");
+let recallState = emptyState({ cwd: "C:/work" });
+recallState = reduceEvent(recallState, user(130, "回忆一下之前的决定"));
+assert.equal(decideRecall({ state: recallState, toolName: "session_search", config: { developerMode: true } }).allow, true, "developer mode bypasses the recall gate");
+assert.equal(decideCompress({ state, mark: undefined, currentTurn: 1, denyCompress: true, developerMode: true }).allow, true, "developer mode bypasses compression denial");
+assert.match(buildCard(gate, { developerMode: true }), /开发者模式/);
+
+// The reasoning detector must not turn planning prose into an open question.
+assert.equal(isReasoningQuestion("用户的意思是A，还是B？"), true);
+assert.equal(isReasoningQuestion("Now client. Need edit dictionaries."), false);
+assert.equal(isReasoningQuestion("Need update lines 46, 160, 161."), false);
+let staleQuestions = emptyState({ cwd: "C:/work" });
+staleQuestions.reasoningQuestions = [{ id: "q-old", seq: 1, lastSeenSeq: 1, text: "Now client. Need edit dictionaries.", status: "open", askedSeq: 0, resolvedSeq: 0, evidence: "" }];
+assert.equal(openReasoningQuestions(staleQuestions).length, 0, "legacy planning prose must not block writes");
+
+// Batch verification: one read can resolve a whole question list.
+let batchState = emptyState({ cwd: "C:/work" });
+batchState = reduceEvent(batchState, {
+  type: "assistant/message",
+  seq: 140,
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 A 是否存在。", "是否应该用 B？"]) }] } },
+});
+const batchIds = openReasoningQuestions(batchState).map((item) => item.id);
+assert.equal(batchIds.length, 2);
+const batchCode = "await tools.agents_verify(" + JSON.stringify({ op: "list_dir", path: "C:/work", questionIds: batchIds }) + ")";
+assert.deepEqual(agentsVerifyQuestionIds(batchCode), batchIds);
+assert.equal(agentsVerifyQuestionId(batchCode), batchIds[0]);
+batchState = reduceEvent(batchState, {
+  type: "tool/call",
+  seq: 141,
+  data: { callId: "batch-verify", name: "run_code", arguments: JSON.stringify({ code: batchCode }) },
+});
+assert.deepEqual(batchState.pendingCalls["batch-verify"].verifyQuestionIds, batchIds, "outer run_code must carry every question id");
+batchState = reduceEvent(batchState, {
+  type: "tool/result",
+  seq: 142,
+  data: { message: { toolCallId: "batch-verify", content: [{ type: "text", text: "batch verified" }], isError: false } },
+});
+assert.equal(openReasoningQuestions(batchState).length, 0, "one batch verification must clear every listed question");
+assert.equal(isReasoningQuestion("A 是否存在？"), true);
+assert.equal(isReasoningQuestion("```ts\nawait tools.agents_verify({\"questionId\":\"q-1\"});\n```"), false, "code snippets must not create a reasoning gate");
+
+// Reasoning risk state: deterministic loop detection, self-report, and JSON export.
+let riskState = emptyReasoningState({ id: 'risk-session', cwd: 'C:/work' });
+riskState = reduceReasoningEvent(riskState, user(300, '只读，先分析，不要写。'));
+const loopText = '检查 A 和 B 的配置差异，目前只有间接证据。';
+for (const seq of [301, 302, 303]) {
+  riskState = reduceReasoningEvent(riskState, {
+    type: 'assistant/message',
+    seq,
+    data: { message: { content: [{ type: 'reasoning', text: loopText }] } },
+  });
+}
+assert.ok(riskState.risk, 'repeated reasoning without new evidence must open a risk');
+assert.equal(riskState.risk.kind, 'loop');
+assert.equal(decideRisk({ reasoningState: riskState, toolName: 'write', code: '', config: {} }).allow, false);
+assert.equal(decideRisk({ reasoningState: riskState, toolName: 'read', code: '', config: {} }).allow, true);
+const staleAmbiguity = Object.assign({}, emptyReasoningState({ id: 'stale' }), { version: 3, risk: { id: 'risk-stale', seq: 1, kind: 'ambiguity', reason: 'old', required: true, review: 'error' } });
+assert.equal(decideRisk({ reasoningState: staleAmbiguity, memoryState: emptyState({ cwd: 'C:/work' }), toolName: 'write', code: '', config: {} }).allow, true, 'an ambiguity risk with no open question must not block writes');
+assert.match(decideRisk({ reasoningState: riskState, toolName: 'write', code: '', config: {} }).reason, /GUARD_STATE/);
+const report = 'GUARD_STATE {"ambiguity":"none","progress":"new_evidence","loop":"none","drift":"aligned","next":"checked both branches"}';
+riskState = reduceReasoningEvent(riskState, {
+  type: 'assistant/message',
+  seq: 304,
+  data: { message: { content: [{ type: 'reasoning', text: report }] } },
+});
+assert.equal(riskState.risk, null, 'a truthful self-report with new evidence must clear the risk');
+assert.equal(decideRisk({ reasoningState: riskState, toolName: 'write', code: '', config: {} }).allow, true);
+assert.equal(parseGuardState(report).progress, 'new_evidence');
+assert.equal(parseGuardState('```\n' + report + '\n```'), null, 'fenced examples must not be parsed as a report');
+const review = parseRiskReview('```json\n{"ambiguity":"none","loop":"none","drift":"aligned","progress":"new_evidence","reason":"ok"}\n```');
+assert.equal(review.progress, 'new_evidence');
+assert.match(buildRiskReviewPrompt({ reasoningState: riskState, memoryState: { lastUserText: '只读' }, config: {} }), /Return ONLY/);
+assert.equal(JSON.stringify(renderReasoningState(riskState, 'risk-session')).includes(loopText), false, 'the persisted state must not contain raw reasoning');
+assert.equal(reasoningSimilarity(loopText, loopText), 1);
+
+// A successful write recorded in state must make an identical retry visible.
+let opState = emptyReasoningState({ id: 'op-session', cwd: 'C:/work' });
+opState = reduceReasoningEvent(opState, user(400, '修改 a.txt。'));
+const editArgs = { file_path: 'a.txt', old_string: 'a', new_string: 'b' };
+opState = reduceReasoningEvent(opState, { type: 'tool/call', seq: 401, data: { callId: 'op-1', name: 'edit', arguments: JSON.stringify(editArgs) } });
+opState = reduceReasoningEvent(opState, { type: 'tool/result', seq: 402, data: { message: { toolCallId: 'op-1', content: [{ type: 'text', text: 'ok' }], isError: false } } });
+assert.equal(opState.completed.length, 1, 'a successful write must be remembered');
+opState = reduceReasoningEvent(opState, { type: 'tool/call', seq: 403, data: { callId: 'op-2', name: 'edit', arguments: JSON.stringify(editArgs) } });
+assert.ok(opState.risk, 'an identical completed write must raise a repeat risk');
+assert.equal(opState.risk.kind, 'repeat');
+assert.match(opState.risk.reason, /already completed at seq 402/);
+
+const completedCard = emptyState({ cwd: 'C:/work' });
+completedCard.completedOperations = [{ seq: 500, name: 'edit', signature: 'edit|abc123' }];
+assert.match(buildCard(completedCard, {}), /已完成操作/);
+const reviewGate = emptyReasoningState({ id: 'review-session', cwd: 'C:/work' });
+reviewGate.risk = { id: 'risk-review-1', seq: 1, kind: 'loop', reason: 'repeat', required: true, review: 'pending' };
+assert.equal(decideRisk({ reasoningState: reviewGate, toolName: 'write', code: '', config: {}, review: { riskId: 'risk-review-1', status: 'clear' } }).allow, true);
+assert.equal(decideRisk({ reasoningState: reviewGate, toolName: 'write', code: '', config: {}, review: { riskId: 'risk-review-1', status: 'blocking', reason: 'still blocked' } }).allow, false);
+
+// A question after the first 600 characters must still be seen.
+let longReasoning = emptyState({ cwd: "C:/work" });
+const longText = summaryReasoning(["我不确定 LONG-FIELD 是否存在。"], "背景材料。".repeat(180) + "\n");
+longReasoning = reduceEvent(longReasoning, {
+  type: "assistant/message",
+  seq: 800,
+  data: { message: { content: [{ type: "reasoning", text: longText }] } },
+});
+const longQuestions = openReasoningQuestions(longReasoning);
+assert.equal(longQuestions.length, 1, "the whole reasoning must be scanned, not just the first 600 characters");
+assert.match(longQuestions[0].text, /LONG-FIELD/);
+assert.equal(longReasoning.reasoningText, "", "raw reasoning must not be stored");
+assert.equal(longReasoning.reasoningSummary.uncertainties[0], "我不确定 LONG-FIELD 是否存在。", "only the summary, never raw reasoning, is retained");
+
+// GUARD_SUMMARY is the only source of distilled uncertainties; raw reasoning stays out of the index.
+let summarized = emptyState({ cwd: "C:/work" });
+const summaryLine = 'GUARD_SUMMARY ' + JSON.stringify({ goal: "finish guard", decisions: ["keep read-only fallback"], uncertainties: ["数据库版本待确认", "A 还是 B？"], next: "ask user", constraints: ["no push"] });
+summarized = reduceEvent(summarized, {
+  type: "assistant/message",
+  seq: 820,
+  data: { message: { content: [{ type: "reasoning", text: "**分析**\n".repeat(60) + "\n" + summaryLine }] } },
+});
+const summaryQuestions = openReasoningQuestions(summarized);
+assert.equal(summaryQuestions.length, 2);
+assert.equal(summaryQuestions[0].source, "summary");
+assert.equal(summaryQuestions[0].text, "数据库版本待确认");
+assert.equal(summarized.reasoningText, "");
+assert.equal(summarized.reasoningSummary.goal, "finish guard");
+assert.match(buildCard(summarized, {}), /数据库版本待确认/);
+
+// A resolved question must not reopen when the model repeats the same sentence.
+let resolvedQuestion = emptyState({ cwd: "C:/work" });
+resolvedQuestion = reduceEvent(resolvedQuestion, {
+  type: "assistant/message",
+  seq: 810,
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 REOPEN-FIELD 是否存在。"]) }] } },
+});
+const firstQuestion = openReasoningQuestions(resolvedQuestion)[0];
+assert.ok(firstQuestion);
+resolvedQuestion = reduceEvent(resolvedQuestion, {
+  type: "tool/call",
+  seq: 811,
+  data: { callId: "resolve-1", name: "agents_verify", arguments: JSON.stringify({ questionId: firstQuestion.id, op: "list_dir", path: "C:/work" }) },
+});
+resolvedQuestion = reduceEvent(resolvedQuestion, {
+  type: "tool/result",
+  seq: 812,
+  data: { message: { toolCallId: "resolve-1", content: [{ type: "text", text: "ok" }], isError: false } },
+});
+assert.equal(openReasoningQuestions(resolvedQuestion).length, 0);
+assert.ok(resolvedQuestion.resolvedReasoningTexts.includes("我不确定 REOPEN-FIELD 是否存在。"));
+resolvedQuestion = reduceEvent(resolvedQuestion, {
+  type: "assistant/message",
+  seq: 813,
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 REOPEN-FIELD 是否存在。"]) }] } },
+});
+assert.equal(openReasoningQuestions(resolvedQuestion).length, 0, "a resolved question must not reopen on an identical repeat");
+assert.equal(decideReasoning({ state: resolvedQuestion, toolName: "write", code: "", config: {} }).allow, true);
+
+// A pending verification without an outer callId must resolve as well.
+let noCallId = emptyState({ cwd: "C:/work" });
+noCallId = reduceEvent(noCallId, {
+  type: "assistant/message",
+  seq: 820,
+  data: { message: { content: [{ type: "reasoning", text: summaryReasoning(["我不确定 NOCALLID-FIELD 是否存在。"]) }] } },
+});
+const noCallIdQuestion = openReasoningQuestions(noCallId)[0];
+noCallId = reduceEvent(noCallId, {
+  type: "tool/call",
+  seq: 821,
+  data: { name: "agents_verify", arguments: JSON.stringify({ questionId: noCallIdQuestion.id, op: "list_dir", path: "C:/work" }) },
+});
+noCallId = reduceEvent(noCallId, {
+  type: "tool/result",
+  seq: 822,
+  data: { message: { toolCallId: "no-callid-result", content: [{ type: "text", text: "ok" }], isError: false } },
+});
+assert.equal(openReasoningQuestions(noCallId).length, 0, "a successful verification without a callId must clear the question");
+
+const selfTest = runGuardSelfTest();
+assert.equal(selfTest.ok, true, "developer self-test failed: " + JSON.stringify(selfTest.cases.filter(item => !item.ok)));
+assert.ok(selfTest.total >= 10, "developer self-test must cover the main gates");
+assert.equal(selfTest.passed, selfTest.total);
+
+const simulatedWrite = simulateGuardScenario({ scenario: "reasoning", toolName: "write" });
+assert.equal(simulatedWrite.decision.allow, false, "simulated write must be blocked by an open reasoning question");
+const simulatedRead = simulateGuardScenario({ scenario: "reasoning", toolName: "read" });
+assert.equal(simulatedRead.decision.allow, true, "simulated read must remain allowed");
+const simulatedBypass = simulateGuardScenario({ scenario: "reasoning", toolName: "write", enforceGates: false });
+assert.equal(simulatedBypass.decision.allow, true, "simulated developer bypass must allow the write");
+
+const legacyState = { version: 3, requirements: [{ seq: 1, text: "legacy requirement" }], llmEntries: [{ id: "m1", kind: "decision", text: "legacy memory" }], lastUserSeq: 1 };
+const migratedState = reduceEvent(legacyState, { type: "turn/start", seq: 2, data: { turn: 1 } });
+assert.equal(migratedState.version, 4, "legacy state must migrate to v4");
+assert.equal(migratedState.requirements.length, 1, "migration must preserve requirements");
+assert.equal(migratedState.llmEntries.length, 1, "migration must preserve model memory");
+assert.deepEqual(migratedState.evidence, [], "migration must add an empty evidence list");
+assert.deepEqual(migratedState.changes, [], "migration must add an empty change list");
+assert.equal(migratedState.task, null, "migration must not invent a task");
+
+
+// Task gate: proposal is not authorization; user confirmation activates it.
+let taskState = emptyState({ cwd: 'C:/work' });
+taskState = reduceEvent(taskState, user(900, '请实现任务门控'));
+assert.equal(decideTask({ state: taskState, toolName: 'write', toolArgs: { file_path: 'C:/work/a.txt' }, config: { taskGate: true } }).allow, false, 'write without an active task must be blocked');
+assert.equal(decideTask({ state: taskState, toolName: 'read', config: { taskGate: true } }).allow, true, 'read-only must remain allowed');
+taskState = reduceEvent(taskState, {
+  type: 'tool/call',
+  seq: 901,
+  data: { name: 'agents_task', arguments: JSON.stringify({ action: 'start', goal: 'task', scope: ['C:/work'], exclusions: ['C:/work/private'] }) },
+});
+taskState = reduceEvent(taskState, { type: 'tool/result', seq: 902, data: { message: { toolCallId: 'call-901', isError: false, content: [] } } });
+assert.equal(taskState.task.status, 'proposed', 'start must only propose');
+assert.equal(decideTask({ state: taskState, toolName: 'write', toolArgs: { file_path: 'C:/work/a.txt' }, config: { taskGate: true } }).allow, false, 'proposal must not authorize');
+taskState = reduceEvent(taskState, user(903, '确认，按这个范围做'));
+assert.equal(taskState.task.status, 'active', 'user confirmation must activate the proposed task');
+assert.equal(decideTask({ state: taskState, toolName: 'write', toolArgs: { file_path: 'C:/work/a.txt' }, config: { taskGate: true } }).allow, true, 'write inside scope must be allowed');
+assert.equal(decideTask({ state: taskState, toolName: 'write', toolArgs: { file_path: 'C:/other/a.txt' }, config: { taskGate: true } }).allow, false, 'write outside scope must be blocked');
+assert.equal(decideTask({ state: taskState, toolName: 'edit', toolArgs: { file_path: 'C:/work/private/a.txt' }, config: { taskGate: true } }).allow, false, 'excluded path must be blocked');
+assert.equal(decideTask({ state: taskState, toolName: 'write', config: { taskGate: true, developerMode: true } }).allow, true, 'developer mode must bypass taskGate');
+assert.equal(isTaskConfirmation('继续'), true);
+assert.equal(isTaskDenial('取消，不做了'), true);
+
+// Structured evidence: host assigns IDs; model cannot claim verified.
+assert.equal(evidenceRecordProblem({ claim: 'A', source: 'file', mechanism: 'read', result: 'yes' }), '');
+assert.match(evidenceRecordProblem({ claim: 'A', source: 'file', mechanism: 'read', result: 'yes', status: 'verified' }), /verified/);
+let evidenceState = emptyState({ cwd: 'C:/work' });
+evidenceState = reduceEvent(evidenceState, { type: 'tool/call', seq: 910, data: { callId: 'ev-1', name: 'agents_evidence', arguments: JSON.stringify({ action: 'add', claim: 'A exists', source: 'file', mechanism: 'read', result: 'found' }) } });
+evidenceState = reduceEvent(evidenceState, { type: 'tool/result', seq: 911, data: { message: { toolCallId: 'ev-1', isError: false, content: [] } } });
+assert.equal(evidenceState.evidence.length, 1, 'successful evidence must be projected');
+assert.match(evidenceState.evidence[0].id, /^ev-/);
+assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', toolArgs: { kind: 'verified', text: 'x' }, config: { evidenceGate: true } }).allow, false, 'verified memory without evidence must be blocked');
+assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', toolArgs: { kind: 'verified', text: 'x', evidence: evidenceState.evidence[0].id }, config: { evidenceGate: true } }).allow, true, 'existing evidence reference must pass');
+assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', toolArgs: { kind: 'verified', text: 'x', evidence: 'ev-999' }, config: { evidenceGate: true } }).allow, false, 'unknown evidence reference must fail');
+assert.match(buildCard(evidenceState, {}), /结构化证据/, 'card must show the evidence ledger');
+
+// --- phase 3-6 gates -------------------------------------------------------
+{
+  const base = emptyState({ cwd: 'G:/proj' });
+  const impact = decideImpact({ state: base, toolName: 'write', toolArgs: { file_path: 'a.txt' }, config: { impactGate: true, developerMode: false } });
+  assert.equal(impact.allow, false, 'impactGate must reject a write without a planned change');
+  assert.match(impact.reason, /agents_change/);
+  const planned = Object.assign({}, base, { changes: [{ id: 'chg-1', target: 'a.txt', invariants: ['keep format'], status: 'planned' }] });
+  assert.equal(decideImpact({ state: planned, toolName: 'write', toolArgs: { file_path: 'a.txt' }, config: { impactGate: true } }).allow, true);
+  assert.equal(decideImpact({ state: planned, toolName: 'write', toolArgs: { file_path: 'b.txt' }, config: { impactGate: true } }).allow, false);
+  const noInvariant = Object.assign({}, base, { changes: [{ id: 'chg-2', target: 'a.txt', invariants: [], status: 'planned' }] });
+  assert.equal(decideImpact({ state: noInvariant, toolName: 'write', toolArgs: { file_path: 'a.txt' }, config: { impactGate: true } }).allow, false);
+  assert.equal(decideImpact({ state: base, toolName: 'read', toolArgs: { file_path: 'a.txt' }, config: { impactGate: true } }).allow, true);
+  assert.equal(decideImpact({ state: base, toolName: 'run_code', code: 'return await tools.read({file_path:"a"})', config: { impactGate: true } }).allow, true);
+  const rec = decideRecovery({ state: base, toolName: 'write', config: { recoveryGate: true } });
+  assert.equal(rec.allow, false, 'recoveryGate must require a baseline');
+  const withBaseline = Object.assign({}, base, { changes: [{ id: 'chg-1', target: 'a.txt', invariants: ['keep'], status: 'planned' }], recovery: [{ id: 'rec-1', changeId: 'chg-1', baseline: 'backup.zip', status: 'baseline' }] });
+  assert.equal(decideRecovery({ state: withBaseline, toolName: 'write', config: { recoveryGate: true } }).allow, true);
+  const ver = decideVerification({ state: planned, toolName: 'agents_change', toolArgs: { action: 'verify', changeId: 'chg-1' }, config: { verificationGate: true } });
+  assert.equal(ver.allow, false, 'verificationGate must require a passing check');
+  const checked = Object.assign({}, planned, { checks: [{ id: 'chk-1', changeId: 'chg-1', status: 'pass' }] });
+  assert.equal(decideVerification({ state: checked, toolName: 'agents_change', toolArgs: { action: 'verify', changeId: 'chg-1' }, config: { verificationGate: true } }).allow, true);
+  assert.equal(decideIndexGate({ state: base, toolName: 'compress', config: { indexGate: true } }).allow, false);
+  const audited = Object.assign({}, base, { indexAudit: { status: 'pass' } });
+  assert.equal(decideIndexGate({ state: audited, toolName: 'compress', config: { indexGate: true } }).allow, true);
+  assert.equal(decideIndexGate({ state: base, toolName: 'read', config: { indexGate: true } }).allow, true);
+  assert.match(changeRecordProblem({ target: 'a', invariants: [] }), /invariant/);
+  assert.equal(changeRecordProblem({ target: 'a', invariants: ['keep'] }), '');
+  assert.match(checkRecordProblem({ assertion: 'a' }), /changeId/);
+  assert.match(recoveryRecordProblem({}), /baseline/);
+}
+
+// Ledger projection: addBounded requires text; changes/checks/recovery must persist.
+{
+  let ledger = emptyState({ cwd: 'G:/proj' });
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 980, data: { callId: 'chg-call', name: 'agents_change', arguments: JSON.stringify({ action: 'plan', target: 'a.txt', invariants: ['keep format'] }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 981, data: { message: { toolCallId: 'chg-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(ledger.changes.length, 1, 'planned change must be projected');
+  assert.match(ledger.changes[0].id, /^chg-/);
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 982, data: { callId: 'chk-call', name: 'agents_check', arguments: JSON.stringify({ action: 'add', changeId: ledger.changes[0].id, assertion: 'readback' }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 983, data: { message: { toolCallId: 'chk-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(ledger.checks.length, 1, 'check must be projected');
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 984, data: { callId: 'rec-call', name: 'agents_recovery', arguments: JSON.stringify({ action: 'baseline', baseline: 'backup.zip' }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 985, data: { message: { toolCallId: 'rec-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(ledger.recovery.length, 1, 'recovery baseline must be projected');
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 986, data: { callId: 'audit-call', name: 'agents_index', arguments: JSON.stringify({ action: 'audit' }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 987, data: { message: { toolCallId: 'audit-call', isError: false, content: [{ type: 'text', text: JSON.stringify({ audit: { status: 'pass' } }) }] } } });
+  assert.equal(ledger.indexAudit.status, 'pass', 'index audit must be projected');
+}
+
+// Recovery baseline must match the current change, not just be the newest baseline.
+{
+  const base = emptyState({ cwd: 'G:/proj' });
+  const planned = Object.assign({}, base, { changes: [{ id: 'chg-1', target: 'a.txt', invariants: ['keep'], status: 'planned' }] });
+  const wrong = Object.assign({}, planned, { recovery: [{ id: 'rec-1', changeId: 'chg-other', baseline: 'old.zip', status: 'baseline' }] });
+  assert.equal(decideRecovery({ state: wrong, toolName: 'write', toolArgs: { file_path: 'a.txt' }, config: { recoveryGate: true } }).allow, false, 'a baseline from another change must not authorize this one');
+  const right = Object.assign({}, planned, { recovery: [{ id: 'rec-2', changeId: 'chg-1', baseline: 'new.zip', status: 'baseline' }] });
+  assert.equal(decideRecovery({ state: right, toolName: 'write', toolArgs: { file_path: 'a.txt' }, config: { recoveryGate: true } }).allow, true);
+}
+
+// Path and lifecycle hardening: relative/absolute paths, .., parent coverage, and verified changes.
+{
+  const base = emptyState({ cwd: 'C:/work' });
+  const active = Object.assign({}, base, { task: { id: 'task-1', goal: 'g', scope: ['C:/work'], exclusions: ['C:/work/private'], status: 'active', sourceSeq: 1, confirmedSeq: 1 } });
+  assert.equal(decideTask({ state: active, toolName: 'write', toolArgs: { file_path: 'sub/a.txt' }, config: { taskGate: true } }).allow, true, 'relative write is resolved against cwd and allowed');
+  assert.equal(decideTask({ state: active, toolName: 'write', toolArgs: { file_path: 'C:/work/private/a.txt' }, config: { taskGate: true } }).allow, false, 'relative exclusion is resolved too');
+  assert.equal(decideTask({ state: active, toolName: 'write', toolArgs: { file_path: 'C:/outside/a.txt' }, config: { taskGate: true } }).allow, false, 'outside scope must be rejected');
+  assert.equal(decideTask({ state: active, toolName: 'write', toolArgs: { file_path: 'C:/work/sub/../a.txt' }, config: { taskGate: true } }).allow, true, 'dot-dot is normalized');
+  const planned = Object.assign({}, base, { changes: [{ seq: 1, id: 'chg-dir', target: 'C:/work/lib', invariants: ['keep'], status: 'planned' }], recovery: [{ changeId: 'chg-dir', baseline: 'zip' }] });
+  assert.equal(decideImpact({ state: planned, toolName: 'write', toolArgs: { file_path: 'lib/a.txt' }, config: { impactGate: true } }).allow, true, 'a parent-directory change covers a child write');
+  assert.equal(decideRecovery({ state: planned, toolName: 'write', toolArgs: { file_path: 'lib/a.txt' }, config: { recoveryGate: true } }).allow, true);
+  assert.equal(decideImpact({ state: planned, toolName: 'write', toolArgs: { file_path: 'other/a.txt' }, config: { impactGate: true } }).allow, false, 'an unrelated target must not use the parent change');
+  const verifiedLatest = Object.assign({}, base, { changes: [
+    { seq: 1, id: 'chg-old', target: 'C:/work/lib/a.txt', invariants: ['old'], status: 'planned' },
+    { seq: 2, id: 'chg-new', target: 'C:/work/lib', invariants: ['new'], status: 'verified' },
+  ], recovery: [{ changeId: 'chg-old', baseline: 'zip' }] });
+  assert.equal(decideImpact({ state: verifiedLatest, toolName: 'write', toolArgs: { file_path: 'C:/work/lib/a.txt' }, config: { impactGate: true } }).allow, false, 'a verified latest change must not fall back to an older planned change');
+  assert.equal(decideRecovery({ state: verifiedLatest, toolName: 'write', toolArgs: { file_path: 'C:/work/lib/a.txt' }, config: { recoveryGate: true } }).allow, false, 'a verified latest change must not reuse an old baseline');
+}
+
+// Continuity handoff: host capsule, stale binding, and the 80% fallback.
+{
+  const base = emptyState({ cwd: 'G:/work' });
+  assert.match(handoffRecordProblem({ next: '' }), /next step/);
+  assert.match(handoffRecordProblem({ next: 'next', preserve: Array.from({ length: 12 }, () => 'x'.repeat(300)) }, 1600), /too long/);
+  const seed = Object.assign({}, base, { lastUserSeq: 10 });
+  const entry = handoffEntryFrom({ step: 'S1 complete', next: 'S2 verify', preserve: ['task scope'], discard: ['raw logs'], risks: ['no rollback'] }, 10, seed);
+  assert.equal(entry.authority, 'model-distilled');
+  const state = Object.assign({}, base, {
+    lastUserSeq: 10,
+    task: { id: 'task-1', goal: 'ship', scope: ['G:/work'], exclusions: [], steps: ['S1', 'S2'], status: 'active', sourceSeq: 1, confirmedSeq: 1 },
+    changes: [{ seq: 1, id: 'chg-1', target: 'G:/work/lib', invariants: ['keep tests'], status: 'planned' }],
+    recovery: [{ changeId: 'chg-1', baseline: 'zip' }],
+    requirements: [{ seq: 1, text: 'ship it' }],
+    continuity: entry,
+  });
+  assert.equal(continuityStatus(state), 'ready');
+  const capsule = buildContinuity(state, { continuityMaxChars: 1600 });
+  assert.match(capsule.text, /下一步: S2 verify/);
+  assert.match(capsule.text, /必须保留: task scope/);
+  assert.match(capsule.text, /可丢弃/);
+  assert.equal(capsule.missing.length, 0);
+  const card = buildCard(state, { continuityMaxChars: 1600 });
+  assert.match(card, /分步计划/);
+  assert.match(card, /接续卡/);
+  assert.equal(decideContinuity({ state: base, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: true } }).allow, false);
+assert.equal(decideContinuity({ state: base, toolName: 'write', pressureRatio: 0.5, config: { continuityGate: true } }).allow, true, 'continuity must only gate compression; without a compression plugin writes stay unaffected');
+assert.equal(decideIndexGate({ state: base, toolName: 'write', config: { indexGate: true } }).allow, true, 'indexGate must not affect non-compression tools');
+  assert.equal(decideContinuity({ state, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: true } }).allow, true);
+  const stale = Object.assign({}, state, { lastUserSeq: 11, continuity: Object.assign({}, entry, { status: 'stale' }) });
+  assert.equal(continuityStatus(stale), 'stale');
+  assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: true } }).allow, false);
+  assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.8, config: { continuityGate: true } }).allow, true, '80% is the emergency fallback');
+  assert.equal(decideContinuity({ state: base, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: false } }).allow, true);
+  let ledger = emptyState({ cwd: 'G:/work' });
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 1, data: { callId: 'h1', name: 'agents_handoff', arguments: JSON.stringify({ action: 'save', step: 'S1', next: 'S2' }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 2, data: { message: { toolCallId: 'h1', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.ok(ledger.continuity && ledger.continuity.next === 'S2', 'handoff save must project');
+  ledger = reduceEvent(ledger, { type: 'user/message', seq: 3, data: { content: [{ type: 'text', text: 'new requirement' }] } });
+  assert.equal(continuityStatus(ledger), 'stale', 'a new user message must stale the handoff');
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 4, data: { callId: 'c1', name: 'compress', arguments: '{}' } });
+  assert.equal(ledger.continuity.compressedSeq, 4, 'compression sequence must be recorded');
+}
+const handoffCall = safeRunCodeCall('return await tools.agents_handoff({action:"save",step:"S1",next:"S2"});');
+assert.equal(handoffCall && handoffCall.name, "agents_handoff", "a single agents_handoff call must be recognized inside run_code");
 
 console.log("core tests passed");

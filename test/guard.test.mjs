@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { apply } from '../lib/index.mjs';
-import { emptyState } from '../lib/core.mjs';
+import { emptyReasoningState, emptyState } from '../lib/core.mjs';
 
 function makeState() {
   const state = emptyState({ cwd: 'C:/work' });
@@ -50,12 +50,13 @@ function makeWorkspaceFiles() {
   };
 }
 
-function harness({ pressureTokens, contextWindow, state, agent, fileService }) {
+function harness({ pressureTokens, contextWindow, state, reasoningState, agent, fileService }) {
   let guard;
   let readBytes = 0;
   const registered = {};
   const handlers = {};
   const session = { id: 's1', header: { cwd: 'C:/work' } };
+  const riskState = reasoningState || emptyReasoningState({ id: 's1', cwd: 'C:/work' });
   const baseFiles = fileService === undefined ? makeWorkspaceFiles() : fileService;
   const files = baseFiles ? Object.assign({}, baseFiles, {
     async readBytes(scope, target, options) {
@@ -75,8 +76,9 @@ function harness({ pressureTokens, contextWindow, state, agent, fileService }) {
       };
     },
     sessionProjections: {
-      async register() {
-        return { stateOf() { return state; } };
+      async register(options) {
+        const source = options && options.key === 'agentsGuardReasoning' ? riskState : state;
+        return { stateOf() { return source; } };
       },
     },
     tools: {
@@ -95,7 +97,7 @@ function harness({ pressureTokens, contextWindow, state, agent, fileService }) {
 }
 
 const execution = { name: 'compress', agent: { id: 's1' }, arguments: {} };
-const strict = { denyCompress: true, compressPressureRatio: 0.8 };
+const strict = { denyCompress: true, compressPressureRatio: 0.8, continuityGate: false };
 
 let h = harness({ pressureTokens: 80000, contextWindow: 100000, state: makeState() });
 await apply(h.ctx, strict);
@@ -112,24 +114,24 @@ onSessionEvent(h.getSession(), { type: 'turn/start', data: { turn: 0 } });
 const denied = h.getGuard()(execution);
 assert.ok(denied && /belongs to turn/.test(denied.reason), 'below 80% must keep the normal card denial');
 
-const ambiguous = makeState();
-ambiguous.ambiguitySeq = 5;
-ambiguous.ambiguityText = '用 A 还是 B？';
-ambiguous.clarifiedSeq = 0;
-ambiguous.lastUserSeq = 5;
-h = harness({ pressureTokens: 90000, contextWindow: 100000, state: ambiguous });
+const reasoningOpen = makeState();
+reasoningOpen.reasoningQuestions = [{ id: 'q-guard-0', seq: 5, lastSeenSeq: 5, text: 'A 是否存在？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
+reasoningOpen.reasoningSeq = 5;
+reasoningOpen.reasoningText = 'A 是否存在？';
+reasoningOpen.reasoningClarifiedSeq = 0;
+h = harness({ pressureTokens: 90000, contextWindow: 100000, state: reasoningOpen });
 await apply(h.ctx, strict);
-assert.equal(h.getGuard()(execution), undefined, 'high pressure must bypass the ambiguity gate for compress');
+assert.equal(h.getGuard()(execution), undefined, 'high pressure must bypass the reasoning gate for compress');
 
-h = harness({ pressureTokens: 10000, contextWindow: 100000, state: ambiguous });
+h = harness({ pressureTokens: 10000, contextWindow: 100000, state: reasoningOpen });
 await apply(h.ctx, strict);
-const ambiguityDenied = h.getGuard()(execution);
-assert.ok(ambiguityDenied && /ambiguous/.test(ambiguityDenied.reason), 'low pressure must still enforce the ambiguity gate');
+const reasoningDenied = h.getGuard()(execution);
+assert.ok(reasoningDenied && /unresolved question/.test(reasoningDenied.reason), 'low pressure must still enforce the reasoning gate');
 
-h = harness({ pressureTokens: 90000, contextWindow: 0, state: ambiguous });
+h = harness({ pressureTokens: 90000, contextWindow: 0, state: reasoningOpen });
 await apply(h.ctx, strict);
 const noWindow = h.getGuard()(execution);
-assert.ok(noWindow && /ambiguous/.test(noWindow.reason), 'a missing context window must not force compress');
+assert.ok(noWindow && /unresolved question/.test(noWindow.reason), 'a missing context window must not force compress');
 
 h = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState() });
 await apply(h.ctx, strict);
@@ -137,7 +139,7 @@ assert.equal(h.getGuard()(execution), undefined, 'internal no-card fallback must
 
 const toolState = makeState();
 toolState.cwd = process.cwd();
-toolState.reasoningQuestions = [{ id: 'q-test-0', seq: 2, lastSeenSeq: 2, text: '是否存在？', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
+toolState.reasoningQuestions = [{ id: 'q-test-0', seq: 2, lastSeenSeq: 2, text: '是否存在？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
 h = harness({ pressureTokens: 10000, contextWindow: 100000, state: toolState });
 await apply(h.ctx, strict);
 const registered = h.getTools();
@@ -158,12 +160,12 @@ assert.match(verified.result.text, /version/);
 assert.ok(h.getReadBytes() > 0, 'agents_verify must read through workspaceFiles');
 await assert.rejects(
   registered.agents_verify.execute({ questionId: 'missing-question', op: 'read_file', path: process.cwd() + '/package.json' }, { agent: { id: 's1' } }),
-  /not an open reasoning question/,
+  /none of the requested IDs are open reasoning questions/,
 );
 
 const noFsState = makeState();
 noFsState.cwd = process.cwd();
-noFsState.reasoningQuestions = [{ id: 'q-nofs-0', seq: 2, lastSeenSeq: 2, text: '服务缺失时怎么办？', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
+noFsState.reasoningQuestions = [{ id: 'q-nofs-0', seq: 2, lastSeenSeq: 2, text: '服务缺失时怎么办？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
 const noFs = harness({ pressureTokens: 10000, contextWindow: 100000, state: noFsState, fileService: null });
 await apply(noFs.ctx, strict);
 await assert.rejects(
@@ -194,4 +196,88 @@ assert.equal(injections, 2, 'a new compression epoch must re-inject the card eve
 handlers['session/event'](h.getSession(), { type: 'turn/start', data: { turn: 1 } });
 assert.equal(injections, 2, 'the re-injected card must not be duplicated in the same epoch');
 
+const guardedRisk = emptyReasoningState({ id: 's1', cwd: 'C:/work' });
+guardedRisk.risk = { id: 'risk-test-1', seq: 1, kind: 'loop', reason: 'repeated reasoning', required: true, review: 'pending', reviewReason: '' };
+h = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), reasoningState: guardedRisk });
+await apply(h.ctx, strict);
+const riskWrite = h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: {} });
+assert.ok(riskWrite && /risk \[risk-test-1\]/.test(riskWrite.reason), 'risk must deny mutating tools');
+assert.equal(h.getGuard()({ name: 'read', agent: { id: 's1' }, arguments: {} }), undefined, 'risk must not deny reads');
+assert.equal(h.getGuard()({ name: 'agents_verify', agent: { id: 's1' }, arguments: {} }), undefined, 'risk must not deny verification');
+
+// A live volatile config reference must take effect without remounting the plugin.
+const liveMode = { value: false, get() { return this.value; } };
+const liveReasoning = makeState();
+liveReasoning.reasoningQuestions = [{ id: 'q-live-0', seq: 2, lastSeenSeq: 2, text: 'A 是否存在？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];
+const liveHarness = harness({ pressureTokens: 10000, contextWindow: 100000, state: liveReasoning });
+await apply(liveHarness.ctx, { developerMode: liveMode, reasoningGate: true });
+assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: {} }));
+liveMode.value = true;
+liveHarness.getHandlers()['loader/volatile-update']();
+assert.equal(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: {} }), undefined, 'a live config update must bypass the gate immediately');
+liveMode.value = false;
+liveHarness.getHandlers()['loader/volatile-update']();
+assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: {} }), 'turning developer mode off must restore the gate immediately');
+
+
+// Runtime task state must update before the next tool call inside the same program.
+{
+  const state = makeState();
+  state.task = { id: 'task-live-1', goal: 'test', scope: ['C:/work'], exclusions: [], status: 'active', sourceSeq: 2, confirmedSeq: 2 };
+  h = harness({ pressureTokens: 10000, contextWindow: 100000, state });
+  await apply(h.ctx, { taskGate: true });
+  const tools = h.getTools();
+  assert.equal(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/x.txt' } }), undefined, 'active task should allow an in-scope write');
+  const closed = await tools.agents_task.execute({ action: 'close' }, { agent: { id: 's1' } });
+  assert.equal(closed.task.status, 'closed');
+  const denied = h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/x.txt' } });
+  assert.ok(denied && /taskGate/.test(denied.reason), 'close must take effect before the next tool call, not after the program ends');
+}
+
+// Starting and confirming a new scope in one program must replace the old scope immediately.
+{
+  const state = makeState();
+  state.lastUserText = '确认执行';
+  h = harness({ pressureTokens: 10000, contextWindow: 100000, state });
+  await apply(h.ctx, { taskGate: true });
+  const tools = h.getTools();
+  await tools.agents_task.execute({ action: 'start', goal: 'new scope', scope: ['C:/work/new'] }, { agent: { id: 's1' } });
+  const confirmed = await tools.agents_task.execute({ action: 'confirm' }, { agent: { id: 's1' } });
+  assert.equal(confirmed.task.status, 'active');
+  assert.equal(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/new/x.txt' } }), undefined, 'the new scope must be active immediately');
+  assert.ok(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/old/x.txt' } }), 'the old scope must not survive the update');
+}
+
+// Continuity: threshold reminder, handoff tool, and step plan.
+{
+  const state = makeState();
+  const notices = [];
+  h = harness({
+    pressureTokens: 80000,
+    contextWindow: 100000,
+    state,
+    agent: { inject(payload) { notices.push(payload && payload.content && payload.content[0] && payload.content[0].text || ''); } },
+  });
+  await apply(h.ctx, { continuityGate: true, writeContinuity: false });
+  const eventHandler = h.getHandlers()['session/event'];
+  eventHandler(h.getSession(), { type: 'assistant/message', data: { turn: 1 } });
+  assert.ok(notices.some((text) => /context pressure/.test(text) && /agents_handoff/.test(text)), '80% pressure must inject the continuity protocol');
+  const count = notices.length;
+  eventHandler(h.getSession(), { type: 'assistant/message', data: { turn: 1 } });
+  assert.equal(notices.length, count, 'the same turn must not be spammed');
+  const tools = h.getTools();
+  assert.ok(tools.agents_handoff, 'agents_handoff must be registered');
+  const saved = await tools.agents_handoff.execute({ action: 'save', step: 'S1 complete', next: 'S2 verify', preserve: ['scope'], discard: ['logs'] }, { agent: { id: 's1' } });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.continuity.status, 'ready');
+  const handoffStatus = await tools.agents_handoff.execute({ action: 'status' }, { agent: { id: 's1' } });
+  assert.equal(handoffStatus.status, 'ready');
+  const cleared = await tools.agents_handoff.execute({ action: 'clear' }, { agent: { id: 's1' } });
+  assert.equal(cleared.ok, true);
+  assert.equal((await tools.agents_handoff.execute({ action: 'status' }, { agent: { id: 's1' } })).status, 'missing');
+  const plan = await tools.agents_task.execute({ action: 'start', goal: 'ship', scope: ['C:/work'], steps: ['S1', 'S2', 'S3'] }, { agent: { id: 's1' } });
+  assert.deepEqual(plan.task.steps, ['S1', 'S2', 'S3']);
+  const planStatus = await tools.agents_task.execute({ action: 'status' }, { agent: { id: 's1' } });
+  assert.deepEqual(planStatus.task.steps, ['S1', 'S2', 'S3'], 'the step plan must survive in the live status');
+}
 console.log('guard tests passed');
