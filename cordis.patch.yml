@@ -3,6 +3,10 @@
       name: '@local/dsh-agents-guard'
       config:
         developerMode: false
+        workflowEnabled: false
+        continuityEnabled: true
+        reasoningEnabled: true
+        memoryEnabled: true
         denyCompress: true
         compressPressureRatio: 0.8
         writeIndex: true

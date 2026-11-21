@@ -1,6 +1,6 @@
 # dsh-agents-guard
 
-> **验证状态（0.8.0）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
+> **验证状态（0.8.1）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
 
 > DSH Host 插件：确定性会话索引 + 压缩前拦截 + 思考疑问/风险闸门。折叠逻辑不调用 LLM；风险出现时可一次性调用当前模型做独立审查。
 
@@ -24,6 +24,7 @@
 - 思考疑问闸门：每个未决疑问有独立 ID。存在未决疑问时，阻断 write/edit/pwsh/compress 与含写入的 `run_code`；只读 `run_code`（包括多句只读调用）放行。判定依据是代码里是否出现 tools.write/edit/pwsh/terminal/plugin_manager、fs 写入/重命名/删除/mkdir、child_process/spawn/exec 等变更 API。直接 read/glob/grep 与 `agents_verify` 永不被阻断。`agents_verify` 是宿主只读工具，只做 read_file/list_dir/grep；传 `questionId` 或 `questionIds`，一次成功解除所列全部 ID，未知 ID 通过 `missingIds` 返回。官方 `ask_user_question` 优先、其次 `ask_user`，两者都进入 WAITING，用户答复只解除被提问的疑问；`agents_memory` 只记录，不参与解除。
 - 用户问句（包括以 `【回答` 开头或包含 `→` 的消息）不会被当成歧义。
 - 开发者模式：`developerMode`（默认 false）旁路所有闸门，便于回归测试；不旁路 DSH 权限、路径处理或索引维护。设置页提供开关，日常使用请关闭。
+- 设置页按四个功能组组织：`workflowEnabled`（任务与变更）、`continuityEnabled`（上下文接续）、`reasoningEnabled`（推理检查）、`memoryEnabled`（记忆与索引）；每组有总开关、开启/关闭/部分启用状态和默认折叠的高级选项，开发与诊断独立折叠。关闭总开关只暂停该组，不删除子配置或已积累的数据；旧配置没有组字段时从子开关推导。
 - 开发者模式提供 `agents_guard_dev` 测试工具：`status` 读取实时状态，`self_test` 跑 14 个确定性闸门用例（含任务、证据、影响、验证、恢复、索引、接续闸门），`simulate` 模拟单个场景（含 `task`），`probe_write` 在 `.tmp/guard-dev` 下创建并立即删除一个测试文件。测试工具不修改真实投影、Markdown 索引或推理状态文件；只有 `probe_write` 会做受控写入。
 - 推理风险闸门：无新证据的重复推理、相同工具签名重复、已完成操作重复、明确约束冲突、自报 loop/drift 会开启风险；风险未清前阻断写入，只读检查与 `agents_verify` 仍可用。可选的一次性独立 LLM 审查只作辅助，审查失败可配置为放行，避免自锁。
 - 推理原文不入库：只保存模型自报的 `GUARD_SUMMARY`（目标/决策/不确定项/下一步）；只有摘要中的不确定项会成为未决疑问。清除最后一个歧义疑问时同步清除对应风险；旧状态通过 reasoning projection 版本迁移清理。
@@ -37,6 +38,10 @@
 
 - `enabled`: 默认 true。
 - `developerMode`: 默认 false。测试时旁路所有闸门；不旁路 DSH 权限或索引维护，日常请关闭。
+- `workflowEnabled`: 默认 false。任务/证据/影响/验证/恢复五个 Gate 的总开关；子开关保持独立，旧配置没有该字段时从子开关推导。
+- `continuityEnabled`: 默认 true。`continuityGate` 与 `writeContinuity` 的总开关；数值设置保留。
+- `reasoningEnabled`: 默认 true。`reasoningGate`、`reasoningRiskGate`、`semanticReview`、`writeReasoningState` 的总开关；数值设置保留。
+- `memoryEnabled`: 默认 true。`recallGate`、`recordGate`、`indexGate`、`writeIndex` 的总开关；数值设置保留。
 - `compressPressureRatio`: 默认 0.8；官方 `tokenMeter.contextPressure()` 达到该比例时强制放行 `compress`，取值需大于 0 且不超过 1。
 - `legacyCompressWithoutCard`: 内部兼容项，固定 true；仅用于插件在轮次中途加载、尚未注入卡的兜底，不提供设置页开关。
 - `writeIndex`: 默认 true。
@@ -71,7 +76,7 @@ npm run check
 npm test
 ```
 
-`npm test` 覆盖思考触发词、批量 questionIds 解除、多疑问互不清除、失败验证不解除、只读/写入 run_code 分类、外层 run_code 解析、任务提案/确认/范围/路径规范化、同程序 close+write 防绕过、证据/变更/检查/恢复/索引审计投影、六个新闸门的 fail-closed 行为、接续卡/接续门控/80% 兜底/接续投影、开发者模式、用户问句不触发闸门和卡片/索引渲染。
+`npm test` 覆盖思考触发词、批量 questionIds 解除、多疑问互不清除、失败验证不解除、只读/写入 run_code 分类、外层 run_code 解析、任务提案/确认/范围/路径规范化、同程序 close+write 防绕过、证据/变更/检查/恢复/索引审计投影、六个新闸门的 fail-closed 行为、接续卡/接续门控/80% 兜底/接续投影、开发者模式、用户问句不触发闸门、分组迁移/有效配置非破坏性，以及设置页四组渲染和卡片/索引渲染。真实 profile 的 user 层迁移已核对：没有 group 字段时按子开关推导，不按 Schema 默认值关闭。
 
 ## 仓库结构
 

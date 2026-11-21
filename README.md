@@ -2,7 +2,7 @@
 
 A DSH bundle that maintains a session index, accepts model-written memory entries, and blocks compression or mutating tools while a reasoning question is unresolved. It includes a Host entry and a small web settings page.
 
-> Verification status (0.8.0): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
+> Verification status (0.8.1): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
 
 ## What it does
 
@@ -26,7 +26,7 @@ A DSH bundle that maintains a session index, accepts model-written memory entrie
 - Developer mode: `developerMode` (default false) bypasses all guard gates for regression testing. It does not bypass DSH permissions, path handling, or index maintenance. The settings page exposes the toggle; leave it off for normal use.
 - Adds an independent reasoning-risk gate. Repeated reasoning without new evidence, repeated tool signatures, repeated completed operations, explicit constraint conflicts, and a self-reported loop or drift can open a risk. Mutating tools are denied until a truthful `GUARD_STATE` arrives; read-only checks and `agents_verify` stay available. An optional one-shot LLM review is advisory, and a failed review can be configured to allow rather than self-lock.
 - Stores only the model-written `GUARD_SUMMARY` (goal, decisions, uncertainties, next); raw reasoning is never persisted, and only summary uncertainties can become open questions. The risk state has its own projection version, and resolving the last ambiguity question clears the associated risk.
-- Settings are live: saving in the settings page changes the next guard call; no reload is required. The page also exposes the new risk, review, memory, and reasoning thresholds.
+- Settings are live: saving in the settings page changes the next guard call; no reload is required. The page is organized into four master groups (`workflowEnabled`, `continuityEnabled`, `reasoningEnabled`, `memoryEnabled`) with default-collapsed advanced options; developer/diagnostics is separate. A group off pauses its children without deleting child settings or accumulated data, and an old profile without group fields derives each group from its children.
 - Developer mode exposes `agents_guard_dev` for complete gate testing: `status`, `self_test` (14 deterministic cases, including task, evidence, impact, verification, recovery, index, and continuity gates), `simulate` for one scenario including `task`, and a confined `probe_write` that creates and deletes a file under `.tmp/guard-dev`. The harness does not mutate live projections, the Markdown index, or the reasoning-state file.
 - Redacts GitHub PATs, classic tokens, and Bearer tokens before storing index entries and rendering cards or agents_memory output.
 
@@ -42,12 +42,16 @@ AGENTS.md requires a persistent session index, forbids treating a compression re
 
 The DSH Settings section **Agents Guard** shows the read permission as read-only: DSH owns path, symlink, and permission handling, and Guard has no second read policy. The same page edits the common Guard policies through the official plugin configuration form. The plugin row configuration page provides the same controls.
 
-The page edits only the common policies: developer mode (testing only), the forced-compression threshold, the recall/record/reasoning gates, the task/evidence/impact/verification/recovery/index gates, the reasoning-risk gate, optional semantic review, the reasoning-state file, loop/repeat thresholds, Markdown index writing, the card size cap, the memory-entry length limit, and recent-memory/question caps. Compression denial and the legacy no-card fallback are fixed internal invariants and are not shown as switches. The remaining limits and tool lists stay in the plugin configuration.
+The page shows four default feature groups — task/change management, context continuity, reasoning checks, and memory/index maintenance — with an on/off/partial state. Advanced options inside each group remain editable when the group is off and preserve their values. Developer/diagnostics is a separate collapsed area. Compression denial and the legacy no-card fallback remain fixed internal invariants.
 
 ## Configuration
 
 - enabled: default true. Set false to leave the plugin loaded but inactive.
 - developerMode: default false. Bypass all guard gates for testing and expose `agents_guard_dev`; it does not bypass DSH permissions or index maintenance. Leave it off in normal use.
+- workflowEnabled: default false. Master switch for taskGate, evidenceGate, impactGate, verificationGate, and recoveryGate. The child settings remain independent; an old profile without this field derives the group from its children.
+- continuityEnabled: default true. Master switch for continuityGate and writeContinuity; numeric continuity settings remain available.
+- reasoningEnabled: default true. Master switch for reasoningGate, reasoningRiskGate, semanticReview, and writeReasoningState; numeric reasoning settings remain available.
+- memoryEnabled: default true. Master switch for recallGate, recordGate, indexGate, and writeIndex; numeric memory/index settings remain available.
 - compressPressureRatio: default 0.8. When official `tokenMeter.contextPressure()` reports at least this fraction of the route context window, compress is forced through all guard checks. The value must be greater than 0 and at most 1.
 - legacyCompressWithoutCard: internal compatibility setting, fixed true. It allows a session that has never injected a card when the plugin loads mid-turn; it is not shown on the settings page.
 - writeIndex: default true. Set false to skip the Markdown file.
@@ -129,4 +133,6 @@ Live activation requires a new DSH session or a restart. Verify that:
 6. an assistant reasoning block such as 我不确定这个字段是否存在 denies a write call;
 7. read-only run_code is allowed, including multiple read calls; mutating run_code and write/edit/pwsh/compress are denied while a reasoning question is open; agents_verify accepts `questionId` or `questionIds` and resolves every listed ID; agents_index returns the card without opening the file.
 8. agents_handoff save returns ready; below 80% a compress without a ready handoff is denied, while the same session with a ready handoff is allowed; a new user message makes the handoff stale.
-9. the settings page exposes continuityGate, writeContinuity, and continuityMaxChars; saving changes the next guard call without a reload.
+9. the settings page exposes the four group switches and their advanced options, including continuityGate, writeContinuity, and continuityMaxChars; saving changes the next guard call without a reload.
+10. group off pauses only the child policy; raw child settings and accumulated task/memory/index/continuity/reasoning data remain.
+11. an old profile without group fields derives each group from its child gates; the settings-page user layer, not the schema defaults, decides an explicit group switch.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+
+- Reorganize the settings page into four feature groups: workflow/change management (`workflowEnabled`), context continuity (`continuityEnabled`), reasoning checks (`reasoningEnabled`), and memory/index maintenance (`memoryEnabled`). Each group has a master switch, an on/off/partial state, and default-collapsed advanced options; developer/diagnostics stays separate and collapsed.
+- Preserve every existing child setting and add `effectiveConfig()`: runtime behavior is `groupEnabled && child`, while the raw child values remain available for the settings form and for re-enabling a group without losing previous choices. Guard decisions, tool reads, card/continuity rendering, index/state writes, and diagnostics use the effective config.
+- Migrate profiles without the new group fields by deriving each group from its old children; an explicit settings `user` layer wins, so schema defaults cannot silently enable a group the user never chose. Mixed child states display as partial, and turning a group off pauses it without deleting task/memory/index/continuity/reasoning data.
+- Add grouped settings rendering plus a real client render test covering the four groups, developer section, partial/off state, empty-profile defaults, and advanced numeric fields. Add core tests for group derivation, explicit-user precedence, effective AND behavior, numeric preservation, non-mutation of raw settings, and runtime decisions honoring the group switch.
+- Fix core and client explicit-user precedence (an explicit user group choice wins even when the value layer still carries the schema default), and wire `maxEvidence` into the evidence projection so the advanced numeric setting actually applies.
+- Version bumped to 0.8.1. The settings grouping/effective config is implemented and tested; the live `settings.describe()` user-layer migration was checked on the current profile (no group fields, effective groups all on), while real DSH settings-page clicking and live per-group toggling remain in the unverified list.
+
 ## 0.8.0
 
 - Add context-continuity support. `agents_task` accepts an ordered `steps` plan; after each completed step, `agents_handoff action=save` records `step`, `next`, `preserve`, `discard`, and `risks`. The step-boundary handoff is the primary path; compression at the boundary keeps the task/goal, scope, active change and invariants, checks, recovery baseline, open questions, and next step.

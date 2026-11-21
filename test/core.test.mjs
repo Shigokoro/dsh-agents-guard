@@ -53,6 +53,7 @@ import {
   memoryRecordProblem,
   mergeLlmEntries,
   normalizeConfig,
+  effectiveConfig,
   redactSecrets,
   reasoningTextOf,
   runGuardSelfTest,
@@ -156,6 +157,70 @@ assert.equal(cfg.denyCompress, true);
 assert.equal(cfg.legacyCompressWithoutCard, true);
 assert.equal(normalizeConfig({ compressPressureRatio: 0.75 }).compressPressureRatio, 0.75);
 assert.equal(normalizeConfig({ compressPressureRatio: 1.5 }).compressPressureRatio, 0.8);
+// Group master switches are separate from the child settings they pause. An
+// old profile without group fields derives its group state from the children;
+// a schema default must not silently enable a group the user never chose.
+const derivedWorkflow = normalizeConfig({ taskGate: true, evidenceGate: false });
+assert.equal(derivedWorkflow.workflowEnabled, true, 'old mixed workflow config must derive an enabled group');
+assert.equal(derivedWorkflow.taskGate, true, 'old child setting must be preserved');
+assert.equal(normalizeConfig({ taskGate: false, evidenceGate: false }).workflowEnabled, false, 'all-off old workflow must derive a disabled group');
+assert.equal(normalizeConfig({ continuityGate: true, writeContinuity: false }).continuityEnabled, true, 'old mixed continuity must derive an enabled group');
+assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { explicit: {} }).workflowEnabled, true, 'a schema default without an explicit user field must not mask old child settings');
+assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { explicit: { workflowEnabled: false } }).workflowEnabled, false, 'an explicit user group choice must win');
+assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { explicit: { workflowEnabled: true } }).workflowEnabled, true, 'an explicit user on must win even when the value layer says off');
+assert.equal(normalizeConfig({ workflowEnabled: true, taskGate: true }, { explicit: { workflowEnabled: null } }).workflowEnabled, false, 'a null explicit group must not silently count as on');
+const groupOff = effectiveConfig({ workflowEnabled: false, taskGate: true, evidenceGate: true, maxEvidence: 7 });
+assert.equal(groupOff.taskGate, false, 'effective workflow child must be paused');
+assert.equal(groupOff.evidenceGate, false, 'every workflow child must be paused');
+assert.equal(groupOff.maxEvidence, 7, 'numeric child settings must survive a paused group');
+assert.equal(groupOff.workflowEnabled, false, 'group state remains readable');
+const isolatedOff = effectiveConfig({
+  workflowEnabled: false, taskGate: true, evidenceGate: true, maxEvidence: 7,
+  continuityEnabled: true, continuityGate: true, writeContinuity: true,
+  reasoningEnabled: true, reasoningGate: true, reasoningRiskGate: true,
+  memoryEnabled: true, recallGate: true, recordGate: true, indexGate: true, writeIndex: true,
+});
+assert.equal(isolatedOff.taskGate, false, 'workflow off must pause its own child');
+assert.equal(isolatedOff.continuityGate, true, 'workflow off must not pause continuity');
+assert.equal(isolatedOff.reasoningGate, true, 'workflow off must not pause reasoning');
+assert.equal(isolatedOff.recallGate, true, 'workflow off must not pause memory');
+assert.equal(isolatedOff.maxEvidence, 7, 'workflow off must keep its numeric setting');
+assert.equal(effectiveConfig({ taskGate: true }, { explicit: { workflowEnabled: false } }).taskGate, false, 'an explicit off must win in effective config');
+const groupChildren = {
+  workflowEnabled: ['taskGate', 'evidenceGate', 'impactGate', 'verificationGate', 'recoveryGate'],
+  continuityEnabled: ['continuityGate', 'writeContinuity'],
+  reasoningEnabled: ['reasoningGate', 'reasoningRiskGate', 'semanticReview', 'writeReasoningState'],
+  memoryEnabled: ['recallGate', 'recordGate', 'indexGate', 'writeIndex'],
+};
+for (const [group, children] of Object.entries(groupChildren)) {
+  const raw = { maxEvidence: 7 };
+  for (const list of Object.values(groupChildren)) for (const child of list) raw[child] = true;
+  raw[group] = false;
+  const eff = effectiveConfig(raw);
+  for (const child of children) assert.equal(eff[child], false, group + ' must pause ' + child);
+  for (const [other, otherChildren] of Object.entries(groupChildren)) {
+    if (other === group) continue;
+    for (const child of otherChildren) assert.equal(eff[child], true, group + ' must not pause ' + other + '.' + child);
+  }
+  assert.equal(eff.maxEvidence, 7, group + ' must not erase numeric settings');
+}
+const continuousOff = effectiveConfig({ continuityEnabled: false, continuityGate: true, writeContinuity: true, continuityMaxChars: 900 });
+assert.equal(continuousOff.continuityGate, false, 'effective continuity gate must be paused');
+assert.equal(continuousOff.writeContinuity, false, 'effective continuity write must be paused');
+assert.equal(continuousOff.continuityMaxChars, 900, 'continuity numeric setting must survive');
+const rawPaused = { continuityEnabled: false, continuityGate: true, writeContinuity: true };
+const rawSnapshot = JSON.stringify(rawPaused);
+effectiveConfig(rawPaused);
+assert.equal(JSON.stringify(rawPaused), rawSnapshot, 'effectiveConfig must not mutate raw child settings');
+const memoryOff = effectiveConfig({ memoryEnabled: false, recallGate: true, recordGate: true, indexGate: true, writeIndex: true });
+assert.equal(memoryOff.recallGate, false, 'memory child must be paused');
+assert.equal(memoryOff.recordGate, false, 'memory child must be paused');
+assert.equal(memoryOff.indexGate, false, 'index gate must be paused');
+assert.equal(memoryOff.writeIndex, false, 'index writing must be paused');
+assert.equal(decideTask({ state: emptyState({ cwd: 'C:/work' }), toolName: 'write', toolArgs: { file_path: 'C:/work/a.txt' }, config: { workflowEnabled: false, taskGate: true } }).allow, true, 'runtime task decision must honor the group switch');
+assert.equal(decideRecord({ state: { lastUserText: '必须记录', lastUserSeq: 4, memoryRecordedSeq: 0 }, toolName: 'write', config: { memoryEnabled: false, recordGate: true } }).allow, true, 'runtime record decision must honor the group switch');
+assert.equal(decideReasoning({ state: { reasoningQuestions: [{ id: 'q-group', text: 'A 还是 B？', status: 'open' }] }, toolName: 'write', config: { reasoningEnabled: false, reasoningGate: true } }).allow, true, 'runtime reasoning decision must honor the group switch');
+assert.equal(decideContinuity({ state: emptyState({ cwd: 'C:/work' }), toolName: 'compress', pressureRatio: 0.2, config: { continuityEnabled: false, continuityGate: true } }).allow, true, 'runtime continuity decision must honor the group switch');
 
 assert.equal(codeIsReadOnly('await tools.read({"file_path":"a"})'), true);
 assert.equal(codeIsReadOnly('const a = await tools.read({"file_path":"a"}); const b = await tools.read({"file_path":"b"});'), true, 'multiple read calls are still read-only');
@@ -759,6 +824,12 @@ assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', t
 assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', toolArgs: { kind: 'verified', text: 'x', evidence: evidenceState.evidence[0].id }, config: { evidenceGate: true } }).allow, true, 'existing evidence reference must pass');
 assert.equal(decideEvidence({ state: evidenceState, toolName: 'agents_memory', toolArgs: { kind: 'verified', text: 'x', evidence: 'ev-999' }, config: { evidenceGate: true } }).allow, false, 'unknown evidence reference must fail');
 assert.match(buildCard(evidenceState, {}), /结构化证据/, 'card must show the evidence ledger');
+let cappedEvidence = emptyState({ cwd: 'C:/work' });
+for (let i = 1; i <= 3; i += 1) {
+  cappedEvidence = reduceEvent(cappedEvidence, { type: 'tool/call', seq: 920 + i * 2, data: { callId: 'cap-' + i, name: 'agents_evidence', arguments: JSON.stringify({ action: 'add', claim: 'claim ' + i, source: 'file', mechanism: 'read', result: 'found' }) } }, { maxEvidence: 2 });
+  cappedEvidence = reduceEvent(cappedEvidence, { type: 'tool/result', seq: 921 + i * 2, data: { message: { toolCallId: 'cap-' + i, isError: false, content: [] } } }, { maxEvidence: 2 });
+}
+assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected evidence');
 
 // --- phase 3-6 gates -------------------------------------------------------
 {
