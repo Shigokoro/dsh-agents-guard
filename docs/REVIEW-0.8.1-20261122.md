@@ -2,7 +2,7 @@
 
 > 日期：2026-11-22
 > 基线：`7d136cf`（0.8.0）之后的 0.8.1 工作树，已提交并推送。
-> 状态：自动化测试与合法 settings API 核查完成；真实浏览器设置页点击仍未完成。源码与报告已提交并推送到 `origin/main`。
+> 状态：自动化测试、合法 settings API 与 reasoning/memory 真实会话副作用核查完成；真实浏览器设置页点击仍未完成。源码与报告已提交并推送到 `origin/main`。
 
 ## 1. 核查范围
 
@@ -23,7 +23,7 @@
 | B 部分启用 | 通过（客户端渲染测试） | 组关闭显示 Off；组开启但部分子项关闭显示 Partial；状态基于有效组/子项。 |
 | C maxEvidence | 通过（合法 API + 投影） | 设置 `maxEvidence=1` 后，运行时配置为 1，2 条模拟 evidence 事件投影只保留 1 条。 |
 | D 保存/重载 | 通过（合法 settings API） | `settings.mutate` 写入 user 层；`set_bundle false→true` 重载后仍保留；随后恢复原 profile。 |
-| E 组隔离 | 通过（四个组单元 + 两个组 live） | 四个组分别关闭的循环断言：只暂停本组子项；workflow 与 continuity 另做了 live 设置验证；数值与原始子配置保留。 |
+| E 组隔离 | 通过（四个组单元 + 四组 live） | 四个组分别关闭的循环断言：只暂停本组子项；workflow/continuity 用合法 settings API，reasoning/memory 用真实会话临时 profile 验证；数值与原始子配置保留。 |
 | F 文档 | 通过（本报告 + PLAN/UNVERIFIED） | 明确区分自动化、合法 API、真实 UI 和未验证项。 |
 
 ## 3. 自动化验证
@@ -66,11 +66,20 @@ npm test
 
 边界：这里的 evidence 是临时探针直接调用 `reduceEvent`，不是 `agents_evidence` 工具在真实会话里的效果；`settings.mutate` 的 `unset` 在该 Host 上保留了字段，最终清理使用了精确 profile edit。
 
+### 4b. 真实会话 reasoning/memory 副作用（2026-11-22）
+
+除合法 settings API 外，另用临时 profile 在真实会话中验证了 reasoning 与 memory 两组；完整命令、错误文本与哈希见 [LIVE-TEST-2026-11-22.md](LIVE-TEST-2026-11-22.md)。
+
+- reasoning：组关闭时存在未解决疑问 `q-28537-0` 仍可写入；组开启时同一写入被拒绝；解除疑问后放行。`AGENT_REASONING_STATE.json` 在组关闭时哈希不变，组开启时发生变化。
+- memory：组关闭时 `agents_memory` 成功但 `AGENT_CONTEXT_INDEX.md` 哈希不变；recordGate 关闭时写入成功、开启时拒绝，记录后放行；recallGate 关闭时 `session_search` 无 Guard 拒绝，开启时先要求 `agents_index`；indexGate 关闭时无效 compress 到达工具，无 Guard 报错。
+- 测试后 profile 恢复 SHA256 `A0C459497BFF4CA7B0AB9EC0E2E403EE5CE24E1B7DC83E90BF6D8B1160DCEBC9`，`.tmp/guard-live` 与 `.tmp/guard-live2` 已删除，Guard 重载，无已跟踪源码改动。
+- 边界：临时 profile 不是桌面设置页点击；`indexGate` 开启且审计失败、真实 `agents_evidence` 工具路径仍未验证；memory 组关闭时 `agents_memory` 的成功提示仍声称写入索引，属已记录文案不一致。
+
 ## 5. 未验证 / 剩余风险
 
 1. **真实设置页点击**：没有正常认证浏览器或点击保存；只用了合法 settings API。视觉布局、折叠交互和真实“部分启用”显示仍未经浏览器端到端验证。
 2. **真实 `agents_evidence` 工具路径**：`maxEvidence` 用投影函数验证，未在真实会话通过 `agents_evidence` 增加证据后再看卡片/门控。
-3. **四个总开关的完整 UI 副作用**：workflow 与 continuity 做了 live；reasoning/memory 的 live 逐组副作用未做，只有单元断言。
+3. **四个总开关的完整 UI 副作用**：workflow/continuity 已用合法 settings API、reasoning/memory 已用真实会话临时 profile 做了 live 副作用验证；仍未做真实桌面 UI 点击；证据见 `docs/LIVE-TEST-2026-11-22.md`。
 4. **旧 DSH / 缺少可选服务 / 其他压缩工具名 / GitHub Actions / 独立第三方审计**：仍未验证，详见 `docs/UNVERIFIED.md`。
 
 ## 6. Git 与交付
