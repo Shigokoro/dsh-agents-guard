@@ -285,6 +285,21 @@ assert.equal(normalizeConfig({ memoryTextMax: 50 }).memoryTextMax, 600);
 assert.equal(normalizeConfig({ memoryTextMax: 700 }).memoryTextMax, 700);
 pr = reduceEvent(pr, { type: 'tool/call', seq: 11, data: { callId: 'idx-1', name: 'agents_index', arguments: '{}' } });
 assert.equal(decideRecall({ state: pr, toolName: 'session_search', config: {} }).allow, true);
+
+// A read-only multi-statement run_code with one embedded agents_index must also satisfy recall-first.
+let embeddedRecall = emptyState({ cwd: 'C:/work' });
+embeddedRecall = reduceEvent(embeddedRecall, { type: 'turn/start', seq: 20, data: { turn: 2 } });
+embeddedRecall = reduceEvent(embeddedRecall, user(21, '回忆一下之前的评审结论'));
+assert.equal(decideRecall({ state: embeddedRecall, toolName: 'session_search', config: {} }).allow, false);
+const embeddedIndexCode = 'const result = await tools.agents_index({"action":"get","format":"card"}); return result;';
+embeddedRecall = reduceEvent(embeddedRecall, { type: 'tool/call', seq: 22, data: { callId: 'idx-embedded', name: 'run_code', arguments: JSON.stringify({ code: embeddedIndexCode }) } });
+assert.equal(decideRecall({ state: embeddedRecall, toolName: 'session_search', config: {} }).allow, true, 'one embedded read-only agents_index must satisfy recall-first');
+const mutatingRecallCode = 'await tools.agents_index({"action":"get"}); await tools.write({"file_path":"x","content":"y"});';
+let mutatingRecall = emptyState({ cwd: 'C:/work' });
+mutatingRecall = reduceEvent(mutatingRecall, { type: 'turn/start', seq: 30, data: { turn: 3 } });
+mutatingRecall = reduceEvent(mutatingRecall, user(31, '回忆一下之前的评审结论'));
+mutatingRecall = reduceEvent(mutatingRecall, { type: 'tool/call', seq: 32, data: { callId: 'idx-mutating', name: 'run_code', arguments: JSON.stringify({ code: mutatingRecallCode }) } });
+assert.equal(decideRecall({ state: mutatingRecall, toolName: 'session_search', config: {} }).allow, false, 'a mutating agents_index program must not satisfy recall-first');
 pr = reduceEvent(pr, { type: 'tool/call', seq: 12, data: { callId: 'mem-1', name: 'agents_memory', arguments: JSON.stringify({ kind: 'requirement', text: 'x' }) } });
 assert.equal(decideRecord({ state: pr, toolName: 'write', code: '', config: {} }).allow, false, 'a pending memory call is not a successful record');
 pr = reduceEvent(pr, { type: 'tool/result', seq: 13, data: { message: { toolCallId: 'mem-1', content: [{ type: 'text', text: 'ok' }], isError: false } } });
@@ -859,7 +874,10 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   assert.match(changeRecordProblem({ target: 'a', invariants: [] }), /invariant/);
   assert.equal(changeRecordProblem({ target: 'a', invariants: ['keep'] }), '');
   assert.match(checkRecordProblem({ assertion: 'a' }), /changeId/);
-  assert.match(recoveryRecordProblem({}), /baseline/);
+  assert.match(recoveryRecordProblem({}), /changeId/);
+  assert.match(recoveryRecordProblem({ baseline: 'backup.zip' }), /changeId/);
+  assert.match(recoveryRecordProblem({ changeId: 'chg-1' }), /baseline/);
+  assert.equal(recoveryRecordProblem({ changeId: 'chg-1', baseline: 'backup.zip' }), '');
 }
 
 // Ledger projection: addBounded requires text; changes/checks/recovery must persist.
@@ -872,9 +890,10 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   ledger = reduceEvent(ledger, { type: 'tool/call', seq: 982, data: { callId: 'chk-call', name: 'agents_check', arguments: JSON.stringify({ action: 'add', changeId: ledger.changes[0].id, assertion: 'readback' }) } });
   ledger = reduceEvent(ledger, { type: 'tool/result', seq: 983, data: { message: { toolCallId: 'chk-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
   assert.equal(ledger.checks.length, 1, 'check must be projected');
-  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 984, data: { callId: 'rec-call', name: 'agents_recovery', arguments: JSON.stringify({ action: 'baseline', baseline: 'backup.zip' }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 984, data: { callId: 'rec-call', name: 'agents_recovery', arguments: JSON.stringify({ action: 'baseline', changeId: ledger.changes[0].id, baseline: 'backup.zip' }) } });
   ledger = reduceEvent(ledger, { type: 'tool/result', seq: 985, data: { message: { toolCallId: 'rec-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
   assert.equal(ledger.recovery.length, 1, 'recovery baseline must be projected');
+  assert.equal(ledger.recovery[0].changeId, ledger.changes[0].id, 'recovery baseline must retain its change binding');
   ledger = reduceEvent(ledger, { type: 'tool/call', seq: 986, data: { callId: 'audit-call', name: 'agents_index', arguments: JSON.stringify({ action: 'audit' }) } });
   ledger = reduceEvent(ledger, { type: 'tool/result', seq: 987, data: { message: { toolCallId: 'audit-call', isError: false, content: [{ type: 'text', text: JSON.stringify({ audit: { status: 'pass' } }) }] } } });
   assert.equal(ledger.indexAudit.status, 'pass', 'index audit must be projected');

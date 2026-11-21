@@ -114,3 +114,13 @@ The question set is limited to explicit uncertainties in the model-written GUARD
 agents_memory writes a runtime entry and calls the Markdown writer immediately. The runtime map is process-local; the Markdown index keeps the entry after restart, but the card does not reload it automatically.
 
 Each agents_memory entry is host-classified as model-inferred or assumption. The tool no longer accepts model-supplied source or authority, so the model cannot claim user-confirmed or tested. User messages are indexed as user-stated. The label is provenance, not independent verification.
+
+## 0.8.2 fixes
+
+`agents_recovery action=baseline` requires a `changeId` that names an existing change; an unbound baseline is rejected. The recovery gate already matched the current change, so this prevents a successful tool call from producing a baseline that cannot authorize the intended write. The recovery projection still records only the bound change.
+
+`agents_memory` builds its success note from the effective `writeIndex` value. When `writeIndex` is off, including when the memory group is off, the note says `AGENT_CONTEXT_INDEX.md` was not updated; the runtime memory card still receives the entry. The note no longer claims a disk write that did not happen.
+
+Recall-first recognition accepts one embedded safe `agents_index` call in a read-only multi-statement `run_code` program, not only a whole-program single call. Code containing a write, process, or plugin mutation does not set the recall sequence. The single-safe-call classifier remains in use for mutation authorization; this is a recognition fix, not a relaxation of the write boundary.
+
+`agents_check` is projected only when `add` is exactly one safe `run_code` call. Calling `add` and `status` in the same program does not project the add because the host sees one outer `run_code` result, not the nested calls. The tool description states this boundary; the ledger semantics are unchanged.

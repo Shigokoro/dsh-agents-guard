@@ -163,6 +163,27 @@ await assert.rejects(
   /none of the requested IDs are open reasoning questions/,
 );
 
+const memoryNoteState = makeState();
+h = harness({ pressureTokens: 10000, contextWindow: 100000, state: memoryNoteState });
+await apply(h.ctx, { writeIndex: false });
+const memoryNoteTool = h.getTools().agents_memory;
+assert.ok(memoryNoteTool, 'agents_memory must be registered');
+const memoryNote = await memoryNoteTool.execute({ action: 'add', kind: 'requirement', text: 'distilled conclusion' }, { agent: { id: 's1' } });
+assert.match(memoryNote.note, /writeIndex is off|not updated/, 'memory-off note must not claim an index write');
+
+const recoveryState = makeState();
+recoveryState.changes = [{ id: 'chg-test', target: 'C:/work', invariants: ['keep'], status: 'planned' }];
+h = harness({ pressureTokens: 10000, contextWindow: 100000, state: recoveryState });
+await apply(h.ctx, strict);
+const recoveryTool = h.getTools().agents_recovery;
+assert.ok(recoveryTool, 'agents_recovery must be registered');
+await assert.rejects(
+  recoveryTool.execute({ action: 'baseline', baseline: 'backup.zip' }, { agent: { id: 's1' } }),
+  /changeId/,
+);
+const recovery = await recoveryTool.execute({ action: 'baseline', changeId: 'chg-test', baseline: 'backup.zip' }, { agent: { id: 's1' } });
+assert.equal(recovery.recovery.changeId, 'chg-test', 'baseline must bind the requested change');
+
 const noFsState = makeState();
 noFsState.cwd = process.cwd();
 noFsState.reasoningQuestions = [{ id: 'q-nofs-0', seq: 2, lastSeenSeq: 2, text: '服务缺失时怎么办？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];

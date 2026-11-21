@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2
+
+- Fix `agents_recovery action=baseline`: `changeId` is now required and must name an existing planned/applied change; an unbound baseline is rejected instead of silently returned. The recovery gate already required a matching change, so this closes the gap between tool success and gate usability.
+- Fix the `agents_memory` success note: when `writeIndex` is off (including the memory group being off), the note says the Markdown index was not updated instead of claiming it was written. The runtime memory card still receives the entry.
+- Fix recall-first recognition for read-only multi-statement `run_code`: one embedded safe `agents_index` call now sets `agentsIndexSeq`, while code containing a write or process/plugin mutation does not. This keeps the single-safe-call security check for mutation paths.
+- Document the existing `agents_check` projection boundary: a check is projected only when `add` is exactly one safe `run_code` call; calling `add` and `status` in the same program does not project the add. The ledger semantics are unchanged.
+- Add core and guard regressions for recovery binding, memory-off wording, embedded recall recognition, and the mutating-code negative case. `npm run check` and `npm test` pass.
+- Reloaded the bundle after the 0.8.2 bump; a live `agents_recovery baseline` without `changeId` was rejected, and a baseline bound to `chg-29506` succeeded.
+
 ## 0.8.1
 
 - Reorganize the settings page into four feature groups: workflow/change management (`workflowEnabled`), context continuity (`continuityEnabled`), reasoning checks (`reasoningEnabled`), and memory/index maintenance (`memoryEnabled`). Each group has a master switch, an on/off/partial state, and default-collapsed advanced options; developer/diagnostics stays separate and collapsed.
