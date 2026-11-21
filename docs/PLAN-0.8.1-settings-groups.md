@@ -70,4 +70,4 @@
 | 组隔离 | 通过（四组单测 + 两组 live） | 每组关闭只暂停本组子项；数值和原始子配置保留 |
 | 文档 | 通过 | 本文件、`docs/REVIEW-0.8.1-20261122.md`、`docs/UNVERIFIED.md` |
 
-结论：0.8.1 的代码级分组与合法 API 保存/重载已核查；真实认证浏览器点击、真实 `agents_evidence` 工具路径和 reasoning/memory 的 live 逐组副作用仍未验证。未 commit、未 push。
+结论：0.8.1 的代码级分组与合法 API 保存/重载已核查；真实认证浏览器点击、真实 `agents_evidence` 工具路径和 reasoning/memory 的 live 逐组副作用仍未验证。源码与报告已提交并推送到 `origin/main`。
