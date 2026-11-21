@@ -18,6 +18,7 @@
 - 四组 live 覆盖：workflow/continuity 由合法 settings API 覆盖；reasoning/memory 由真实会话覆盖。完整证据、命令与恢复哈希见 `docs/LIVE-TEST-2026-11-22.md`。
 - 0.8.2 修复回归（2026-11-22）：`agents_recovery action=baseline` 不带 `changeId` 被拒绝，带存在 `changeId` 成功；memory 关闭/`writeIndex=false` 时 `agents_memory` 提示明确说明未更新 `AGENT_CONTEXT_INDEX.md`；只读多语句 `run_code` 中单个 `agents_index` 可解锁 recallGate，含写操作的同形态代码不解锁；`npm run check` 与 `npm test` 全绿。
 - 0.8.2 live 重载（2026-11-22）：bundle 关闭再启用均 `application: applied`；真实 `agents_recovery baseline` 不带 `changeId` 返回 `changeId is required`，带 `chg-29506` 成功返回绑定该变更的 baseline。
+- 0.8.2 live memory-off（2026-11-22）：临时把 `memoryEnabled: false` 写入 profile 并重载后，真实 `agents_memory` 返回 `Recorded in the session memory card; writeIndex is off, so AGENT_CONTEXT_INDEX.md was not updated.`；恢复 profile 后 SHA256 回到 `A0C459...0DCEBC9`，`.tmp/guard-live3` 已删除。
 - `agents_check action=add` 在严格单条安全调用下会投影；`add` 与 `status` 放在同一程序时不会投影，这是既有 single-safe-call 边界，不是 0.8.2 新增限制。
 - 单元测试中的 14 项 `self_test` 通过（含 continuity 的 missing/ready/stale/80% 兜底）。该结果来自测试进程，不是真实会话的 80% 提醒。
 - 真实 Host 重载后 `agents_handoff status` 为 `ready`；`AGENT_CONTINUITY.md` 已写入工作区。

@@ -8,6 +8,7 @@
 - Document the existing `agents_check` projection boundary: a check is projected only when `add` is exactly one safe `run_code` call; calling `add` and `status` in the same program does not project the add. The ledger semantics are unchanged.
 - Add core and guard regressions for recovery binding, memory-off wording, embedded recall recognition, and the mutating-code negative case. `npm run check` and `npm test` pass.
 - Reloaded the bundle after the 0.8.2 bump; a live `agents_recovery baseline` without `changeId` was rejected, and a baseline bound to `chg-29506` succeeded.
+- Live-verified the memory-off note with a temporary `memoryEnabled=false` profile: `agents_memory` reported that `AGENT_CONTEXT_INDEX.md` was not updated. The profile was restored byte-for-byte and the temporary directory was removed.
 
 ## 0.8.1
 
