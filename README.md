@@ -2,7 +2,7 @@
 
 A DSH bundle that maintains a session index, accepts model-written memory entries, and blocks compression or mutating tools while a reasoning question is unresolved. It includes a Host entry and a small web settings page.
 
-> Verification status (0.8.3): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
+> Verification status (0.8.4): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
 
 ## What it does
 
@@ -16,7 +16,7 @@ A DSH bundle that maintains a session index, accepts model-written memory entrie
 - Adds impact/invariants (`agents_change`, `impactGate` default false): a plan records target, direct/indirect impact, at least one explicit invariant, and the verification plan before protected mutations.
 - Adds verification (`agents_check`, `verificationGate` default false): a check is tied to a change and must be recorded as pass before the change can be marked verified.
 - Adds recovery (`agents_recovery`, `recoveryGate` default false): a high-impact write requires a recorded baseline bound to that change (`changeId`); a baseline for another change does not cover it, and this is a ledger entry, not an automatic backup.
-- Adds index integrity (`agents_index action=audit`, `indexGate` default false): compression requires a recent audit with status pass; the audit names empty required sections.
+- Adds index integrity (`agents_index action=audit`, `indexGate` default false): compression requires an audit with status pass or warn; an `incomplete` audit names the missing required sections. Empty advisory sections only warn, so a session that has not written files yet can still compress.
 - Adds a task-authorization gate (`taskGate`, default false). `agents_task start` records a model-proposed goal, allowed path prefixes, and exclusions; a proposal is not user authorization. `confirm` succeeds only when the latest user message is a confirmation; `close` closes the task. When enabled, write/edit/pwsh/run_code and plugin-manager mutations require an active task, and out-of-scope or excluded paths are denied. The card shows the current task status; developer mode still bypasses it. This is a heuristic scope check, not a security boundary.
 - Adds context continuity (`continuityGate`, default true). A multi-step task records an ordered `steps` list and calls `agents_handoff save` after each completed step (step/next/preserve/discard/risks). Below the 80% context threshold, compression without a ready handoff is denied; at or above the existing `compressPressureRatio` (0.8) the host projection is allowed as a fallback. There is no separate 70% threshold. The continuity card and `AGENT_CONTINUITY.md` distinguish host-projected state from model-distilled notes; after compression, resume from the card and do not redo completed operations.
 - Works without a context-compression plugin. The compression-only gates (`denyCompress`, `continuityGate`, `indexGate`) do not run when no `compress` tool exists; index, memory, task, evidence, recovery, and handoff tools remain available. Without `tokenMeter`, there is no 80% reminder or pressure exemption, so call `agents_handoff save` at step boundaries manually. Other compression tools with different names are not intercepted.
@@ -71,7 +71,7 @@ The page shows four default feature groups — task/change management, context c
 - impactGate: default false. Require a planned `agents_change` with direct/indirect impact and at least one invariant before write/edit/pwsh/non-read-only run_code/plugin_manager. `impactGateTools` lists the guarded tools.
 - verificationGate: default false. Require at least one recorded `pass` check for a change before `agents_change action=verify`.
 - recoveryGate: default false. Require a recorded `agents_recovery` baseline bound to the current `changeId` before high-impact writes. A baseline from another change does not authorize the write; the baseline is user/model-provided text, not an automatic snapshot.
-- indexGate: default false. Require `agents_index action=audit` status=pass before compression; the normal card/record gates still apply after the pressure exemption.
+- indexGate: default false. Require `agents_index action=audit` status pass or warn before compression; `incomplete` (no recorded requirements) is denied. The normal card/record gates still apply after the pressure exemption.
 - taskGate: default false. Require a user-confirmed active task with a matching path scope before write/edit/pwsh/non-read-only run_code/plugin_manager mutations; `taskGateTools` lists the guarded tools. `agents_task` itself, read-only tools, agents_index, agents_memory, and agents_verify remain allowed.
 - continuityGate: default true. Below 80% context pressure, compression requires a ready current `agents_handoff`; at or above 80% the host projection is allowed as the emergency fallback.
 - continuityMaxChars: default 1600; range 300–4000. Caps the continuity card and `AGENT_CONTINUITY.md`.

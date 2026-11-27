@@ -1,6 +1,6 @@
 # dsh-agents-guard
 
-> **验证状态（0.8.3）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
+> **验证状态（0.8.4）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
 
 > DSH Host 插件：确定性会话索引 + 压缩前拦截 + 思考疑问/风险闸门。折叠逻辑不调用 LLM；风险出现时可一次性调用当前模型做独立审查。
 
@@ -15,7 +15,7 @@
 - 影响与不变量（`agents_change`，`impactGate` 默认 false）：变更计划记录目标、直接影响、间接影响、至少一条不变量与验证计划；受保护写入前必须先有计划。
 - 变更验证（`agents_check`，`verificationGate` 默认 false）：检查项绑定 change，必须记录 pass 才能把变更标记为 verified。
 - 恢复点（`agents_recovery`，`recoveryGate` 默认 false）：高风险写入前必须记录与该变更 `changeId` 绑定的 baseline（副本、提交或精确恢复点）；别的变更的 baseline 不能放行本次写入。这是登记项，不是自动备份。
-- 索引完整性（`agents_index action=audit`，`indexGate` 默认 false）：压缩前必须有一次 status=pass 的审计；审计会列出仍为空的必需区块。
+- 索引完整性（`agents_index action=audit`，`indexGate` 默认 false）：压缩前必须有一次 status=pass 或 warn 的审计；`incomplete` 会拒绝并列出空的必需区块。只有 advisory 区块为空时给 warn（例如还没写盘的会话），不影响压缩。
 - 任务授权闸门（`taskGate`，默认 false）：`agents_task start` 只登记模型提出的目标、允许的路径前缀和排除路径，提案本身不等于用户授权；`confirm` 只有在最新用户消息是确认时才成功，`close` 关闭任务。启用后，write/edit/pwsh/含写入的 `run_code` 与 plugin_manager 变更需要 active 任务，范围外或排除路径会被拒绝；卡片显示任务状态，开发者模式仍可旁路。范围检查是启发式，不是安全边界。
 - 上下文接续（`continuityGate` 默认 true）：长任务用 `agents_task` 的 `steps` 登记分步计划；每完成一步调用 `agents_handoff save`，记录 step/next/preserve/discard/risks，并在步骤边界压缩。低于 80% 时没有 ready 接续会拒绝压缩；达到现有 80% 阈值则允许宿主投影兜底，不另设 70% 阈值。接续卡区分宿主投影与模型提炼内容；同时写入 `AGENT_CONTINUITY.md`，压缩后按卡恢复，不重做已完成操作。
 - 兼容无上下文压缩插件：没有 `compress` 工具时，压缩相关门控（`denyCompress`、`continuityGate`、`indexGate`）不会触发；索引、记忆、任务、证据/恢复账本与 `agents_handoff` 仍可用。没有 `tokenMeter` 时没有 80% 提醒或压力豁免，需在步骤边界手动 `agents_handoff save`；其他插件使用不同工具名的压缩不会被拦截。
@@ -54,7 +54,7 @@
 - `impactGate` / `impactGateTools`：影响与不变量门控（默认 false）；受保护写入需有带 invariant 的 `agents_change` 计划。
 - `verificationGate`：变更验证门控（默认 false）；`agents_change action=verify` 需要至少一条 pass 的 `agents_check`。
 - `recoveryGate`：恢复点门控（默认 false）；高风险写入前需用 `agents_recovery baseline` 记录与当前 `changeId` 匹配的 baseline。
-- `indexGate`：索引完整性门控（默认 false）；压缩前需 `agents_index action=audit` 状态 pass。
+- `indexGate`：索引完整性门控（默认 false）；压缩前需 `agents_index action=audit` 状态 pass 或 warn（`incomplete` 拒绝）。
 - `taskGate` / `taskGateTools`：任务授权闸门（默认 false）与受保护工具名单；`agents_task`、只读工具、`agents_index`、`agents_memory`、`agents_verify` 不受阻断。
 - `continuityGate`：接续门控（默认 true）；低于 80% 时压缩必须有当前 ready 的 `agents_handoff`，达到 80% 则允许宿主投影兜底。
 - `continuityMaxChars`：接续卡/接续文件上限，默认 1600，范围 300–4000。

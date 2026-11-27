@@ -1,7 +1,7 @@
-# 未验证声明（0.8.3）
+# 未验证声明（0.8.4）
 
-> 本文件是 0.8.3 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.3；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.4 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.4；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -18,6 +18,7 @@
 - 四组 live 覆盖：workflow/continuity 由合法 settings API 覆盖；reasoning/memory 由真实会话覆盖。完整证据、命令与恢复哈希见 `docs/LIVE-TEST-2026-11-22.md`。
 - 0.8.2 修复回归（2026-11-22）：`agents_recovery action=baseline` 不带 `changeId` 被拒绝，带存在 `changeId` 成功；memory 关闭/`writeIndex=false` 时 `agents_memory` 提示明确说明未更新 `AGENT_CONTEXT_INDEX.md`；只读多语句 `run_code` 中单个 `agents_index` 可解锁 recallGate，含写操作的同形态代码不解锁；`npm run check` 与 `npm test` 全绿。
 - 0.8.2 live 重载（2026-11-22）：bundle 关闭再启用均 `application: applied`；真实 `agents_recovery baseline` 不带 `changeId` 返回 `changeId is required`，带 `chg-29506` 成功返回绑定该变更的 baseline。
+- 0.8.4 压缩修复单测（2026-11-27）：`decideCompress` 在 mark 的 turn 落后时放行、user seq 落后时仍拒绝；`decideIndexGate` 放行 `warn`、拒绝 `incomplete`；`auditIndex` 按 critical/advisory 分类，`requirements` 与 `userLog` 全空为 `incomplete`；`injectCard` 的提前记账与缺失 agent/失败注入分支由 `guard.test.mjs` 覆盖。`npm run check` 与 `npm test` 全绿。
 - 0.8.3 设置热更新 live（2026-11-27）：通过合法 settings API 临时把 `taskGate` 写入 user 层并立即生效：`true` 时下一次写入被拒绝（`target is outside the active task scope`，文件未创建），`false` 时下一次写入立即成功；无需重载。实际设置页点击仍未验证。
 - 0.8.2 live memory-off（2026-11-22）：临时把 `memoryEnabled: false` 写入 profile 并重载后，真实 `agents_memory` 返回 `Recorded in the session memory card; writeIndex is off, so AGENT_CONTEXT_INDEX.md was not updated.`；恢复 profile 后 SHA256 回到 `A0C459...0DCEBC9`，`.tmp/guard-live3` 已删除。
 - `agents_check action=add` 在严格单条安全调用下会投影；`add` 与 `status` 放在同一程序时不会投影，这是既有 single-safe-call 边界，不是 0.8.2 新增限制。
@@ -32,7 +33,9 @@
 2. **设置页真实点击**：没有用浏览器或 UI 自动化点击保存。已检查字段、静态读取、默认值、真实 React 渲染（最小 stand-in）和保存转换；2026-11-22 用无头 Edge 访问本机 Web GUI 时返回 `dsh web authentication required`，没有绕过认证或执行已认证点击；这不等于浏览器 UI 端到端通过。
 2b. **四个总开关的真实桌面 UI 行为**：workflow/continuity 已用合法 settings API、reasoning/memory 已用真实会话临时 profile 验证关闭/恢复与子项副作用；仍未在真实 DSH 桌面设置页点击四组开关并观察所有工具与文件副作用。
 3. **卸载压缩插件的真实 profile**：没有在真实 profile 中卸载上下文压缩插件做端到端矩阵；“无压缩插件”行为来自代码分支、单测、`docs/COMPATIBILITY.md` 与显式错误路径。
-3b. **indexGate 开启且审计失败**：没有构造失败审计验证真实拦截；本次只验证了 indexGate 关闭时 Guard 不拦截 compress。
+3b. **indexGate 开启且审计失败/警告的真实拦截**：0.8.4 只在单测里验证 `incomplete` 拒绝与 `warn` 放行；没有在真实会话里开启 indexGate 复现拒绝，也没有观察一次 `warn` 审计后真实 compress 放行。
+3c. **真实会话的压缩重放**：0.8.4 的 turn 判定修复没有用真实会话重放「卡片 turn 落后导致拒绝」的原始场景；Guard 重新启用后还没有实测过一次真实 compress 通过（单测只证明判定函数行为）。
+3d. **注入失败/agent 缺失路径**：`injectCard` 在 agent 缺失或注入 Promise 挂起时的提前记账与 warn 日志只有单测与静态审查，没有在真实 Host 触发。
 4. **其他压缩工具名**：Guard 只拦截 `compress`。第三方插件若使用其他工具名，不会被 `denyCompress`/`continuityGate`/`indexGate` 拦截；这是当前边界。
 5. **旧 DSH 缺少 `tools.guard`**：可选注册分支未在旧版本 Host 上真实执行。缺少时预期是“插件加载、门控关闭、日志 warning”，但没有实测。
 6. **GitHub Actions**：没有检查工作流的实际运行结果。

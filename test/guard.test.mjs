@@ -107,12 +107,15 @@ h = harness({ pressureTokens: 81000, contextWindow: 100000, state: makeState() }
 await apply(h.ctx, strict);
 assert.equal(h.getGuard()(execution), undefined, 'above 80% must force compress');
 
-h = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), agent: { inject() {} } });
+const injectedState = makeState();
+h = harness({ pressureTokens: 10000, contextWindow: 100000, state: injectedState, agent: { inject() {} } });
 await apply(h.ctx, strict);
 const onSessionEvent = h.getHandlers()['session/event'];
 onSessionEvent(h.getSession(), { type: 'turn/start', data: { turn: 0 } });
+assert.equal(h.getGuard()(execution), undefined, 'a card covering the latest user message must allow compress even when the turn counter differs');
+injectedState.lastUserSeq = 3;
 const denied = h.getGuard()(execution);
-assert.ok(denied && /belongs to turn/.test(denied.reason), 'below 80% must keep the normal card denial');
+assert.ok(denied && /covers user seq/.test(denied.reason), 'a card older than the latest user message must still be denied below 80%');
 
 const reasoningOpen = makeState();
 reasoningOpen.reasoningQuestions = [{ id: 'q-guard-0', seq: 5, lastSeenSeq: 5, text: 'A 是否存在？', source: 'summary', status: 'open', askedSeq: 0, resolvedSeq: 0, evidence: '' }];

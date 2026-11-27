@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.4
+
+- Fix compression denied by turn bookkeeping: `decideCompress` compared the injected card's turn with `turnBoundaryOf().lastTurn`, but the two values come from different sources, so a card injected on turn 1 blocked compression on turn 3 with `the session index card belongs to turn 1, current turn is 3` and the turn could not recover. The turn comparison is removed; the card's recorded user sequence remains the staleness check.
+- Fix audit status starving compression: `agents_index action=audit` returned `pass` only when all four required groups were non-empty, and the documented flow (`agents_memory` then `agents_handoff`) never fills `changedFiles`/`checks` or `decisions`/`openItems`. A read-only session therefore could not reach `pass`. `auditIndex` now treats `requirements`/`userLog` as critical (empty -> `incomplete`) and the other groups as advisory (empty -> `warn`); `indexGate` accepts `pass` or `warn`, and the denial reason names the missing sections.
+- Harden injection bookkeeping: `injectCard` now advances the marker when an injection attempt starts, including a missing `agent`/`agent.inject` or a pending `agent.inject` promise, and logs each case; a failure keeps the marker and clears the card hash so the next turn retries. Previously a missing agent returned silently and left the marker frozen.
+- Log every missing pressure source once: `readContextPressure` now warns when `ctx.get('tokenMeter')`, `contextPressure`, or a positive `contentWindow`/`pressureTokens` pair is unavailable, instead of returning null silently. The 80% exemption still cannot fire without a real meter; the log now says why.
+- Add core and guard regressions: stale-turn compression is allowed, a stale user sequence is still denied, `indexGate` accepts `warn` and rejects `incomplete`, and `auditIndex` classifies each group. `npm run check` and `npm test` pass (`core`, `guard`, `client`).
+- Project every embedded ledger call: `embeddedToolCalls` now returns all safe `run_code` calls, and `reduceEvent` projects each `agents_change`/`agents_check`/`agents_recovery` call in a multi-call program instead of dropping all but the last. `embeddedToolCall` keeps its single-call contract for the recall/record checks, and `isSafeGateRunCode` still requires every detected call to be safe.
+- Restore settings-page contrast: section and permission panels use `bg-layer-2`, secondary text uses `label-secondary`, the group switch uses `brand-primary`, and the primary button uses `button-primary-fill`/`label-primary-foreground` with a neutral disabled fill and `label-tertiary` text instead of `opacity`.
+- Version bumped to 0.8.4.
+
 ## 0.8.3
 
 - Fix settings hot-apply: `normalizeConfig` previously overlaid the settings user layer only for the four group switches, so saving a child gate such as `taskGate`, `recallGate`, or `developerMode` wrote the user layer while the running Guard kept the old profile value. The whole explicit user layer is now overlaid before boolean normalization and group derivation; group precedence is unchanged.

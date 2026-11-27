@@ -34,7 +34,7 @@ When the latest user message states a requirement, correction, decision, or acce
 
 `agents_change` records a plan with target, direct/indirect impact, at least one invariant, and a verification plan (`chg-<seq>`); `apply`/`verify` update the projection, and `verify` requires at least one recorded passing check when `verificationGate` is on. `agents_check` attaches an assertion/command/expected/actual/evidence to a change and records pass/fail/pending (`chk-<seq>`); a check is model-stated, not a host test execution. `agents_recovery` records a baseline/rollback/verify entry (`rec-<seq>`) with its owning `changeId`; `recoveryGate` only accepts a baseline whose `changeId` matches the current planned change covering the target, and it does not create a backup. `impactGate` requires a planned change with an invariant covering the target before protected mutations.
 
-`agents_index action=audit` reports counts and empty required sections and writes `indexAudit` to the projection; `indexGate` requires status=pass before compression. The pressure exemption runs before this gate. All six gates default false and are heuristic bookkeeping, not a security boundary.
+`agents_index action=audit` classifies empty sections and writes `indexAudit` to the projection. `requirements`/`userLog` is critical: when both are empty the status is `incomplete` and compression is denied. `task`/`llmEntries`/`changes`, `decisions`/`openItems`, and `changedFiles`/`checks` are advisory: an empty one yields `warn`, which `indexGate` accepts, so a read-only session that recorded requirements and memory but wrote no files can still compress. `indexGate` requires status `pass` or `warn`; `incomplete` is denied and the reason names the missing sections. The pressure exemption runs before this gate. All six gates default false and are heuristic bookkeeping, not a security boundary.
 
 ## Context continuity
 
@@ -49,10 +49,11 @@ The plugin registers a global tool guard. For compress, the guard reads the curr
 
 1. the projection is unavailable;
 2. no card was injected in this session;
-3. the injected card belongs to a different turn;
-4. a user message arrived after the injected card.
+3. a user message arrived after the injected card.
 
-The denial reason names the sequence numbers. It is a denial, not a reminder: the compress call does not run. `denyCompress` is fixed on. A session with no injected card is allowed only by the fixed internal `legacyCompressWithoutCard` fallback; it is not exposed in the settings page. A card that belongs to another turn or predates the latest user message is still denied unless the pressure exemption applies.
+The guard compares the card's recorded user sequence, not its turn: the injection bookkeeping and `turnBoundaryOf()` do not share a turn source, and the marker must survive an injection attempt that failed or is still pending. The marker advances when an attempt starts, including when `agent`/`agent.inject` is unavailable or the injection promise is pending; a failure keeps the marker and clears the card hash so the next turn retries. A card injected during an earlier turn therefore still authorizes compression as long as no newer user message exists.
+
+The denial reason names the sequence numbers. It is a denial, not a reminder: the compress call does not run. `denyCompress` is fixed on. A session with no injected card is allowed only by the fixed internal `legacyCompressWithoutCard` fallback; it is not exposed in the settings page. A card that predates the latest user message is still denied unless the pressure exemption applies.
 
 Before those checks, the guard reads the official `tokenMeter.contextPressure(session)` and compares `pressureTokens / contextWindow` with `compressPressureRatio` (default 0.8). When the ratio is at or above the threshold, compress is allowed immediately, even when the projection is unavailable, no card was injected, the card is stale, or the reasoning gate is open. This is the only escape hatch, and it applies only to compress: other mutating tools remain gated. The exemption is inactive before the first logged request or when tokenMeter has no `pressureTokens`/`contextWindow`; it never guesses context use from text length.
 

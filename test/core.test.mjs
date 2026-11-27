@@ -6,6 +6,7 @@ import {
   codeIsReadOnly,
   codeVerifies,
   safeRunCodeCall,
+  embeddedToolCalls,
   decideCompress,
   decideRecall,
   decideRecord,
@@ -21,6 +22,7 @@ import {
   decideImpact,
   decideRecovery,
   decideVerification,
+  auditIndex,
   decideIndexGate,
   changeRecordProblem,
   checkRecordProblem,
@@ -116,9 +118,12 @@ assert.equal(hashCard(card), hashCard(card));
 
 const allow = decideCompress({ state, mark: { turn: 1, seq: 2 }, currentTurn: 1, denyCompress: true });
 assert.equal(allow.allow, true);
-const denyTurn = decideCompress({ state, mark: { turn: 0, seq: 2 }, currentTurn: 1, denyCompress: true });
-assert.equal(denyTurn.allow, false);
-assert.match(denyTurn.reason, /turn/);
+// Regression: a stale turn number must not deny on its own. The mark and the
+// gate read the turn from different counters, and a pending or rejected
+// injection used to freeze the mark at an older turn; the only freshness
+// requirement is that the card covers the latest user message.
+const staleTurnSameSeq = decideCompress({ state, mark: { turn: 0, seq: 2 }, currentTurn: 3, denyCompress: true });
+assert.equal(staleTurnSameSeq.allow, true, 'turn mismatch alone must not deny');
 const denySeq = decideCompress({ state, mark: { turn: 1, seq: 1 }, currentTurn: 1, denyCompress: true });
 assert.equal(denySeq.allow, false);
 assert.match(denySeq.reason, /seq/);
@@ -876,7 +881,20 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   assert.equal(decideIndexGate({ state: base, toolName: 'compress', config: { indexGate: true } }).allow, false);
   const audited = Object.assign({}, base, { indexAudit: { status: 'pass' } });
   assert.equal(decideIndexGate({ state: audited, toolName: 'compress', config: { indexGate: true } }).allow, true);
+  // Advisory-only gaps must not block compression: a read-only turn never
+  // writes a file, and requiring changedFiles/checks made compress impossible.
+  const warned = Object.assign({}, base, { indexAudit: { status: 'warn', missing: ['changedFiles/checks'] } });
+  assert.equal(decideIndexGate({ state: warned, toolName: 'compress', config: { indexGate: true } }).allow, true);
+  const incomplete = Object.assign({}, base, { indexAudit: { status: 'incomplete', missing: ['requirements/userLog'] } });
+  const incompleteGate = decideIndexGate({ state: incomplete, toolName: 'compress', config: { indexGate: true } });
+  assert.equal(incompleteGate.allow, false);
+  assert.match(incompleteGate.reason, /requirements\/userLog/);
   assert.equal(decideIndexGate({ state: base, toolName: 'read', config: { indexGate: true } }).allow, true);
+  assert.equal(auditIndex({ requirements: 1 }).status, 'warn');
+  assert.deepEqual(auditIndex({ requirements: 1 }).advisory, ['task/llmEntries/changes', 'decisions/openItems', 'changedFiles/checks']);
+  assert.equal(auditIndex({ lastUserSeq: 3 }).status, 'incomplete');
+  assert.deepEqual(auditIndex({ lastUserSeq: 3 }).critical, ['requirements/userLog']);
+  assert.equal(auditIndex({ requirements: 1, llmEntries: 2, changedFiles: 1, decisions: 1 }).status, 'pass');
   assert.match(changeRecordProblem({ target: 'a', invariants: [] }), /invariant/);
   assert.equal(changeRecordProblem({ target: 'a', invariants: ['keep'] }), '');
   assert.match(checkRecordProblem({ assertion: 'a' }), /changeId/);
@@ -903,6 +921,50 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   ledger = reduceEvent(ledger, { type: 'tool/call', seq: 986, data: { callId: 'audit-call', name: 'agents_index', arguments: JSON.stringify({ action: 'audit' }) } });
   ledger = reduceEvent(ledger, { type: 'tool/result', seq: 987, data: { message: { toolCallId: 'audit-call', isError: false, content: [{ type: 'text', text: JSON.stringify({ audit: { status: 'pass' } }) }] } } });
   assert.equal(ledger.indexAudit.status, 'pass', 'index audit must be projected');
+}
+
+// Multi-call run_code: every ledger call must be projected, not only the first.
+{
+  const code = [
+    'const a = await tools.agents_change({ action: "plan", target: "multi-a.txt", invariants: ["keep a"] });',
+    'const b = await tools.agents_change({ action: "plan", target: "multi-b.txt", invariants: ["keep b"] });',
+    'return { a, b };',
+  ].join('\n');
+  const calls = embeddedToolCalls(code);
+  assert.equal(calls.length, 2, 'both ledger calls must be parsed');
+  assert.equal(isSafeGateRunCode(code), true, 'multi-call read-only script must pass the safe gate');
+  let ledger = emptyState({ cwd: 'G:/proj' });
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 990, data: { callId: 'multi-call', name: 'run_code', arguments: JSON.stringify({ code }) } });
+  assert.equal(ledger.pendingCalls['multi-call'].calls.length, 2, 'both calls must be recorded');
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 991, data: { message: { toolCallId: 'multi-call', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(ledger.changes.length, 2, 'both plans must reach the projected ledger');
+  assert.deepEqual(ledger.changes.map((item) => item.target).sort(), ['multi-a.txt', 'multi-b.txt']);
+  assert.equal(new Set(ledger.changes.map((item) => item.id)).size, 2, 'multi-call ids must be unique');
+
+  const checkCode = [
+    'const c = await tools.agents_check({ action: "add", changeId: "chg-existing", assertion: "multi check" });',
+    'const r = await tools.agents_recovery({ action: "baseline", changeId: "chg-existing", baseline: "multi.zip" });',
+    'return { c, r };',
+  ].join('\n');
+  let checked = Object.assign({}, ledger, { changes: [{ id: 'chg-existing', target: 'multi-a.txt', invariants: ['keep'], status: 'planned' }] });
+  checked = reduceEvent(checked, { type: 'tool/call', seq: 992, data: { callId: 'multi-ledger', name: 'run_code', arguments: JSON.stringify({ code: checkCode }) } });
+  checked = reduceEvent(checked, { type: 'tool/result', seq: 993, data: { message: { toolCallId: 'multi-ledger', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(checked.checks.length, 1, 'multi-call check must project');
+  assert.equal(checked.recovery.length, 1, 'multi-call recovery baseline must project');
+}
+
+// Damaged projection arrays must be repaired instead of throwing.
+{
+  const damaged = Object.assign({}, emptyState({ cwd: 'G:/proj' }), {
+    changes: null,
+    checks: 'not-an-array',
+    recovery: { bad: true },
+  });
+  const input = { type: 'tool/call', seq: 994, data: { callId: 'repair-call', name: 'agents_change', arguments: JSON.stringify({ action: 'plan', target: 'repair.txt', invariants: ['keep'] }) } };
+  const repaired = reduceEvent(damaged, input);
+  assert.ok(Array.isArray(repaired.changes), 'changes must be repaired to an array');
+  assert.ok(Array.isArray(repaired.checks), 'checks must be repaired to an array');
+  assert.ok(Array.isArray(repaired.recovery), 'recovery must be repaired to an array');
 }
 
 // Recovery baseline must match the current change, not just be the newest baseline.
