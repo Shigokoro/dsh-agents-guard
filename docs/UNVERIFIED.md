@@ -1,7 +1,7 @@
-# 未验证声明（0.8.6）
+# 未验证声明（0.8.7）
 
-> 本文件是 0.8.6 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.6；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.7 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.7；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -26,6 +26,9 @@
 - 真实 Host 重载后 `agents_handoff status` 为 `ready`；`AGENT_CONTINUITY.md` 已写入工作区。
 - 接续 ready 后 `compress` 被放行；无接续时同一门控会拒绝压缩。
 - 同程序 `agents_task close` 后写入被 taskGate 拒绝；`agents_handoff` 单条安全调用可写入持久投影；缺少 `SAFE_RUN_CODE_TOOLS` 条目导致的投影丢失已复现并修复。
+
+- 0.8.7 挂载登记（2026-11-27 本机真实 profile）：用 DSH 自己的 `composeEntries`/`loadOverlayPatches` 组合真实 profile，改前 211 条、`agents-guard` 0 条并出现 `compose: patch: entry "agents-guard" not found`；把 `@local/dsh-agents-guard` 加进 `dsh.profile.bundles` 后 212 条、`agents-guard` 1 条（`name: @local/dsh-agents-guard`、无 config 键），guard 相关告警 0。随后无需重启，`tools.agents_*` 出现、`agents_handoff action=status` 返回 `build: 0.8.6`。
+- 0.8.6 真实压缩链路（2026-11-27 本会话 live）：`agents_handoff action=save` 返回 `status: ready`、`savedSeq 3314`、`coveredUserSeq 3314`、`build 0.8.6`，同一 `run_code` 程序内紧接着的 `compress` 成功（208247 tokens，2 个块）。这正是 0.8.5 失败、且无 handoff 时被 `continuityGate` 拒绝的同一条路径。
 
 ## 未验证
 
@@ -59,3 +62,4 @@ npm test
 ## 声明边界
 
 Guard 的任务/证据/影响/验证/恢复/索引/接续门控是工作流账本与启发式约束，不是安全认证，也不是完整沙箱。缺依赖时的降级只保证“不硬失败/不假装具备该能力”，不保证在缺少能力时仍能保护上下文或完成压缩。不能把本文件中的“已验证”理解为对全部功能、全部平台或全部插件组合的保证。
+6. **代码改动的热加载**：本机 DSH 存在 `dsh-hmr`（`hmr/change`、`hmr/reload`、`watchConfig`），但 guard 的 `lib/*.mjs` 改动是否需要重新挂载没有实测确认；0.8.7 结论（配置热、代码需重挂载）来自 `apply()` 每次挂载只执行一次与 ESM 模块缓存，不是实测的反例。

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.7
+
+- Register the plugin as a DSH bundle instead of as a top-level profile patch entry. `package.json` already declared `dsh.bundle.patch`, but the profile listed `agents-guard` as a top-level patch entry, and a top-level entry can only override an existing node: DSH reported `compose: patch: entry "agents-guard" not found` and never inserted the plugin. The documented install step is now "add `@local/dsh-agents-guard` to `dsh.profile.bundles`"; composing the real profile with DSH own `composeEntries` yields one `agents-guard` entry (`name: @local/dsh-agents-guard`) with no guard warnings.
+- Ship a patch that only inserts the node. `cordis.patch.yml` no longer pins 30 config values; it carries `insert -> id: agents-guard / name: @local/dsh-agents-guard`. The shipped copy pinned `compressPressureRatio: 0.8`, which silently overrode the 0.75 schema default, and duplicated every other default, so a settings value and the schema could disagree with no way to tell which one won.
+- Keep tunables out of the bundle patch. Defaults live in the `Config` schema (`lib/index.mjs`) and can be changed at runtime through the DSH settings layer (`settings.update(ns, patch, expectedRevision)`, `applies: live`), which the plugin already reads in `readSettingsValues`/`syncConfig` and subscribes to through `settings/document-updated`, `settings/changed`, `app-boot/config-reload`, and `loader/volatile-update`. No reload is needed for a value change; a code change still needs the plugin to be re-mounted, because `apply` runs once per mount and ESM modules are cached.
+- Fix the README compress-exception sentence that still stated the pre-0.8.6 default (`0.8`) next to the 0.75 configuration entry.
+- Version bumped to 0.8.7.
+
 ## 0.8.6
 
 - Fix the handoff persistence chain behind `continuityGate requires a current agents_handoff before compression (stale; missing: next)`: a save could report `ready` while the gate read an older projection, because the live value was overwritten by `user/message` bookkeeping, a `null` live value shadowed the projected one, and a batched `run_code` save was dropped when the program also called a non-ledger tool. Continuity now resolves through `pickHandoff([live, projected, persisted])`, the user-message handler no longer writes continuity, and `embeddedHandoffCall` recovers a save from any program that mixes `agents_handoff` with other tools.

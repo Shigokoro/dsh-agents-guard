@@ -1,35 +1,12 @@
+# dsh-agents-guard ships as a profile bundle: add this package to
+# dsh.profile.bundles and the insert below mounts the plugin.
+#
+# Defaults live in exactly one place — the Config schema in lib/index.mjs
+# (plus DEFAULT_CONFIG in lib/core.mjs). Do not pin values here: a copy in this
+# file silently overrides the schema, which is how 0.8.6 shipped with
+# compressPressureRatio: 0.8 while the schema default was 0.75. User overrides
+# are written to the settings document by the settings page and applied live
+# through settings/changed.
 - insert:
     - id: agents-guard
       name: '@local/dsh-agents-guard'
-      config:
-        developerMode: false
-        workflowEnabled: false
-        continuityEnabled: true
-        reasoningEnabled: true
-        memoryEnabled: true
-        denyCompress: true
-        compressPressureRatio: 0.8
-        writeIndex: true
-        recallGate: true
-        recordGate: true
-        taskGate: false
-        continuityGate: true
-        continuityMaxChars: 1600
-        continuityFile: AGENT_CONTINUITY.md
-        writeContinuity: true
-        evidenceGate: false
-        maxEvidence: 20
-        impactGate: false
-        verificationGate: false
-        recoveryGate: false
-        indexGate: false
-        reasoningGate: true
-        reasoningRiskGate: true
-        semanticReview: true
-        writeReasoningState: true
-        loopThreshold: 2
-        toolRepeatThreshold: 3
-        memoryTextMax: 600
-        recentMemoryMax: 12
-        maxReasoningQuestions: 8
-        maxCardChars: 4200

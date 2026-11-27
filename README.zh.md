@@ -1,6 +1,6 @@
 # dsh-agents-guard
 
-> **验证状态（0.8.6）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
+> **验证状态（0.8.7）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
 
 > DSH Host 插件：确定性会话索引 + 压缩前拦截 + 思考疑问/风险闸门。折叠逻辑不调用 LLM；风险出现时可一次性调用当前模型做独立审查。
 
@@ -32,7 +32,11 @@
 
 ## 安装
 
-把本目录作为本地 DSH bundle（link 或打包）安装，并启用 `agents-guard`。无运行时依赖。
+把本目录作为 profile 的本地依赖（`link:` 即可），再把 `@local/dsh-agents-guard` 写进 profile 清单的 `dsh.profile.bundles`。插件自带 `dsh.bundle.patch`，`agents-guard` 节点由 DSH 自己插入。
+
+不要把 `- id: agents-guard` 顶层条目粘进 profile 的 `cordis.patch.yml`：非 `insert` 补丁只能覆盖已存在的节点，DSH 只会在告警里写 `patch: entry "agents-guard" not found` 并跳过——这就是插件装了却始终不出现在工具列表、重启也没用的原因。
+
+参数在设置页改（或走 `settings.update`），改完下一次门控调用即生效，不需要重载。改 `lib/*.mjs` 才需要重新挂载（插件停用再启用，或重启应用），因为 `apply()` 每次挂载只跑一次、ESM 模块有缓存。
 
 ## 配置
 
