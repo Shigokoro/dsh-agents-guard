@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.10
+
+- Fix `agents_memory` returning values the host rejects. The success path returned `file: null` and `error: null`, but the tool output schema declares both as strings, so every successful call failed with `tool "agents_memory" returned invalid output: "value.error" must be a string`. The payload is now built without those keys and they are added only when the write reported a path or an error.
+- Add schema-conformance regressions: a successful note must omit `error` and contain no null or undefined value, and a surfaced failure must carry a string `error`. The host validates the declared schema, so the shape is part of the contract, not a cosmetic detail.
+- Version bumped to 0.8.10.
+
 ## 0.8.9
 
 - Load the persisted memory index before the card is built. `loadPersistedMemory` was only called from `agents_index`, so a fresh process, or a turn after the in-memory map was gone, injected a card that dropped every entry already on disk. `injectCard` now calls it before `buildCard`, and the read is synchronous (`fsSync.readFileSync`) so the card is complete when the host renders it; an async version moved the injection mark past the await and broke two existing timing assertions (`test/guard.test.mjs:118`, `test/guard.test.mjs:214`).

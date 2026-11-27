@@ -135,6 +135,12 @@ Recall-first recognition accepts one embedded safe `agents_index` call in a read
 
 `agents_check` is projected only when `add` is exactly one safe `run_code` call. Calling `add` and `status` in the same program does not project the add because the host sees one outer `run_code` result, not the nested calls. The tool description states this boundary; the ledger semantics are unchanged.
 
+## 0.8.10 output-schema conformance
+
+`agents_memory` declared `file` and `error` as strings in its output schema but returned `file: null` and `error: null` on the success path, so the host rejected the whole result with `tool "agents_memory" returned invalid output: "value.error" must be a string`. Every call to the tool failed, even though the entry itself had been written and the memory closure worked.
+
+The success payload now omits those keys and adds them only when the write reported a file or an error. The regressions assert the shape rather than only the values: a successful note has no `error` key and no null or undefined value, and a failed note carries a string `error`. The rule this establishes is that a tool output must satisfy its own declared schema on every branch, and that the assertion belongs beside the success path, not only in the failure path.
+
 ## 0.8.9 memory closure and task recovery
 
 Memory lives in three places and only one of them is authoritative across a restart: the `agentsGuardMemory` session projection, the in-process `runtimeMemory` map, and `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`. 0.8.9 makes the disk index the recovery source for the injected card and keeps the other two as caches in front of it.

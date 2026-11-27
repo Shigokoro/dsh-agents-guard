@@ -1,7 +1,7 @@
-# 未验证声明（0.8.9）
+# 未验证声明（0.8.10）
 
-> 本文件是 0.8.9 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.9；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.10 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.10；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -38,6 +38,7 @@
 - 0.8.9 记忆闭环（2026-11-28，容器内，`test/guard.test.mjs`）：`DSH_HOME` 指向临时目录，`agents_memory add` 返回 `ok: true`、`persisted: true`，磁盘生成 `agent-context/s-memory-write/AGENT_CONTEXT_INDEX.md` 且含该条目；把同一文件复制成另一会话的索引后只触发 `turn/start`，注入卡片仍含该条目（等价于重启后从磁盘恢复）。写失败用同名路径建成目录触发 `EISDIR`：返回 `ok: false`、`persisted: false`、`error` 非空，note 不声称已持久。读失败同样用目录模拟：首轮卡片注入但不含该条目，删掉目录并放入真实索引后第二轮注入含该条目，证明读取失败会重试。
 - 0.8.9 任务恢复（2026-11-28，容器内）：`mergeTaskState` 七个用例覆盖 proposed 不升级、active 从投影恢复、closed 不被陈旧 active 复活、投影消失后 closed 视为无任务、更新的 active 覆盖旧 live、旧 proposal 不覆盖 active、proposed→active 由投影升级。`test/guard.test.mjs` 的集成块在没有任何 liveTasks 条目的前提下让 Gate 按 `projected.task` 判定：proposed 与 closed 拒绝写入，active 在 scope 内放行、scope 外拒绝。
 - liveTasks 丢失时 Gate 的判定来源：`lib/index.mjs:196-198` 的 `stateWithLiveTask` 在没有 live 条目时直接返回投影 state，门读到的是 `state.task`；`mergeTaskState` 只决定 live 与投影谁更权威，不会凭空造出任务。
+- 0.8.10 输出 schema 回归（2026-11-28，容器内，`test/guard.test.mjs`）：成功结果的 note 不含 `error` 且无 null/undefined 值，失败结果带字符串 `error`；`npm run check` 与 `npm test`（core/guard/client）全绿。
 ## 未验证
 
 1. **真实 75% tokenMeter 提醒**：本次会话未达到 75% 阈值，未观察到真实注入。只有 guard 单测、core 场景和 `self_test` 覆盖。
@@ -61,6 +62,7 @@
 14. **同步读盘的开销**：`injectCard` 现在每个会话同步读一次 `AGENT_CONTEXT_INDEX.md`（之后命中缓存）。文件大小与首轮注入延迟没有实测；大索引（数百 KB）下是否可接受未知。
 15. **代码改动的热加载**：0.8.8 已取得实测反例（磁盘 0.8.8、运行实例仍报 0.8.7，见「已验证」中 0.8.8 代码热加载反例）。仍未验证的是：除重启 DSH 外，是否存在更轻量的重挂载入口（例如关闭再启用该 bundle 条目）能让新代码生效。
 16. **`run_code` 的 task scope 缺口**：`taskPathOf` 只读取 `file_path` / `path` / `filename`，带写入的 `run_code` 目标为空，`decideTask` 因此跳过 scope 与 exclusion 检查（`lib/core.mjs:2421`）。这是已确证的边界，本轮按范围约束未修；`run_code` 的实际写入不受任务范围审计。
+17. **0.8.10 的 live 成功调用**：修复只在容器内验证。0.8.9 在真实会话里对 `agents_memory` 的失败已实测（`"value.error" must be a string`）；修复后是否真能返回 `ok: true`、`persisted: true`，需要热加载后的真实调用确认。
 
 ## 复现
 

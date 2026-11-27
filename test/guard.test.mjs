@@ -335,6 +335,8 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
     const note = await writer.getTools().agents_memory.execute({ action: 'add', kind: 'requirement', text: 'durable memory sentinel' }, { agent: { id: writerId } });
     assert.equal(note.ok, true, 'a successful index write must report ok');
     assert.equal(note.persisted, true, 'ok must mean the entry reached the disk');
+    assert.equal(note.error, undefined, 'a successful result must omit error: the host validates it as a string');
+    assert.ok(!Object.values(note).some((value) => value === null || value === undefined), 'the host rejects null/undefined where the output schema declares a type');
     const written = path.join(home, 'agent-context', writerId, 'AGENT_CONTEXT_INDEX.md');
     assert.ok(fsSync.existsSync(written), 'agents_memory must write the index before reporting success');
     const onDisk = fsSync.readFileSync(written, 'utf8');
@@ -363,6 +365,7 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
     assert.equal(failed.ok, false, 'a failed index write must not report ok');
     assert.equal(failed.persisted, false, 'a failed write must not claim durability');
     assert.ok(failed.error, 'a failed write must surface the error');
+    assert.equal(typeof failed.error, 'string', 'a surfaced error must be a string for the output schema');
     assert.match(failed.note, /not durable|write failed/, 'the note must not claim the entry survives a restart');
 
     // A failed read must stay retryable: the next turn picks the memory up.
