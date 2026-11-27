@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.5
+
+- Project `agents_handoff` from multi-call `run_code` programs: `embeddedLedgerCalls` now keeps handoff entries (previously only change/check/recovery were projected), and the tool/result reducer applies `handoffEntryFrom` for them. A batched "save handoff + audit + status" program no longer leaves the compress gate reading a stale capsule with `continuityGate requires a current agents_handoff ... missing: next`.
+- Advance the index-card injection mark by user sequence: `advanceInjectedMark` keeps seq monotonic even when the turn value is unknown or behind, and `injectCard` is retried on non-turn events while `cardMarkCovers` reports the latest user message is not covered. This fixes `the index card covers user seq N but the latest user message is seq M`.
+- Add regressions: multi-call handoff reaches `continuityStatus === 'ready'`; the mark advances for a newer seq, refuses a lower seq, and `cardMarkCovers` reports coverage.
+- Version bumped to 0.8.5.
+
 ## 0.8.4
 
 - Fix compression denied by turn bookkeeping: `decideCompress` compared the injected card's turn with `turnBoundaryOf().lastTurn`, but the two values come from different sources, so a card injected on turn 1 blocked compression on turn 3 with `the session index card belongs to turn 1, current turn is 3` and the turn could not recover. The turn comparison is removed; the card's recorded user sequence remains the staleness check.

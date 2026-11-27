@@ -71,6 +71,7 @@ Each summary uncertainty gets a stable ID (q-<eventSeq>-<index>). While any ques
 
 - sessionProjections.register: agentsGuardMemory at stateVersion 4 and agentsGuardReasoning at stateVersion 4 (additive fields are optional; old reasoning state migrates and clears stale ambiguity risks instead of blocking a fresh session).
 - session/event turn/start: inject the card and record turn plus last user sequence; refresh the live task/handoff overlay from the projection.
+- session/event user/message and other non-turn events: if the recorded mark no longer covers the latest user sequence, inject the refreshed card and advance the mark by seq (turn is best-effort); the mark never regresses in seq.
 - session/event turn/end and user/message: queue one Markdown update and rewrite AGENT_CONTINUITY.md when a handoff exists; a user message makes the handoff stale.
 - session/event assistant/message and assistant/attempt: parse GUARD_SUMMARY, create explicit uncertainty questions, update the risk state, inject one notice, and refresh the Markdown block.
 - session/event tool/call and tool/result: record every question ID on the outer run_code call when its code is exactly agents_verify (questionId or questionIds); a successful tool/result resolves every listed question. A direct agents_verify call is handled the same way. The same pair captures agents_task, agents_handoff, agents_memory, and the six ledger tools; compress records compressedSeq on the continuity entry.

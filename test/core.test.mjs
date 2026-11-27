@@ -7,6 +7,9 @@ import {
   codeVerifies,
   safeRunCodeCall,
   embeddedToolCalls,
+  embeddedLedgerCalls,
+  advanceInjectedMark,
+  cardMarkCovers,
   decideCompress,
   decideRecall,
   decideRecord,
@@ -951,6 +954,32 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   checked = reduceEvent(checked, { type: 'tool/result', seq: 993, data: { message: { toolCallId: 'multi-ledger', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
   assert.equal(checked.checks.length, 1, 'multi-call check must project');
   assert.equal(checked.recovery.length, 1, 'multi-call recovery baseline must project');
+}
+
+// Multi-call handoff: a batched agents_handoff save must reach continuity.
+{
+  const code = [
+    'const h = await tools.agents_handoff({ action: "save", step: "multi", next: "resume" });',
+    'const a = await tools.agents_index({ action: "audit" });',
+    'return { h, a };',
+  ].join('\n');
+  const entries = embeddedLedgerCalls(code);
+  assert.equal(entries.length, 1, 'only the handoff call is a ledger entry');
+  assert.equal(entries[0].handoff.action, 'save', 'handoff entry must be kept');
+  let ledger = emptyState({ cwd: 'G:/proj' });
+  ledger.lastUserSeq = 42;
+  ledger = reduceEvent(ledger, { type: 'tool/call', seq: 995, data: { callId: 'multi-handoff', name: 'run_code', arguments: JSON.stringify({ code }) } });
+  ledger = reduceEvent(ledger, { type: 'tool/result', seq: 996, data: { message: { toolCallId: 'multi-handoff', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(continuityStatus(ledger), 'ready', 'multi-call handoff must yield a ready capsule');
+  assert.equal(ledger.continuity.next, 'resume');
+}
+
+// Card marks advance by user seq even when the turn value lags.
+{
+  assert.deepEqual(advanceInjectedMark({ turn: 9, seq: 740 }, 0, 1405), { turn: 0, seq: 1405 }, 'newer seq must advance');
+  assert.equal(advanceInjectedMark({ turn: 5, seq: 10 }, 6, 9), null, 'lower seq must not regress');
+  assert.equal(cardMarkCovers({ turn: 9, seq: 1405 }, 1405), true);
+  assert.equal(cardMarkCovers({ turn: 9, seq: 740 }, 1405), false);
 }
 
 // Damaged projection arrays must be repaired instead of throwing.

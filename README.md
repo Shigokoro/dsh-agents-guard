@@ -2,7 +2,7 @@
 
 A DSH bundle that maintains a session index, accepts model-written memory entries, and blocks compression or mutating tools while a reasoning question is unresolved. It includes a Host entry and a small web settings page.
 
-> Verification status (0.8.4): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
+> Verification status (0.8.5): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
 
 ## What it does
 

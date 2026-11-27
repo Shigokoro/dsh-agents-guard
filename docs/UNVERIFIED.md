@@ -1,7 +1,7 @@
-# 未验证声明（0.8.4）
+# 未验证声明（0.8.5）
 
-> 本文件是 0.8.4 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.4；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.5 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.5；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -43,6 +43,7 @@
 8. **独立审查**：报告是执行者自述 + 可重跑证据；没有第三方逐行审计。SHA256 只是包身份，不是正确性证明。
 9. **宿主投影与模型接续文本**：projection 字段是确定性的；`step/next/preserve/discard/risks` 是模型提炼文本，不独立验证。
 10. **`agents_check` 多调用投影边界**：`agents_check add` 只有作为单条安全 `run_code` 调用时才进入投影；同一程序里再调用 `status` 或其他安全工具不会投影 add。账本语义未改，工具描述已说明。
+11. **0.8.5 的 live 压缩重放**：多调用 handoff 投影与卡片 seq 标记的修复只有 core 回归与本地 check/test；0.8.4 在真实会话里两次压缩被拒（`continuityGate ... missing: next`、`the index card covers user seq 740 but the latest user message is seq 1405`）是修复依据，但 0.8.5 尚未在重载后的 Host 上实测一次真实 compress 通过。
 
 ## 复现
 
