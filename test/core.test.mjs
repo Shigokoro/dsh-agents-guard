@@ -22,6 +22,7 @@ import {
   decideReasoning,
   decideRisk,
   decideTask,
+  mergeTaskState,
   decideContinuity,
   buildContinuity,
   continuityStatus,
@@ -1162,4 +1163,16 @@ assert.equal(decideIndexGate({ state: base, toolName: 'write', config: { indexGa
 const handoffCall = safeRunCodeCall('return await tools.agents_handoff({action:"save",step:"S1",next:"S2"});');
 assert.equal(handoffCall && handoffCall.name, "agents_handoff", "a single agents_handoff call must be recognized inside run_code");
 
+
+// A8: mergeTaskState keeps the authoritative task across restarts and stale projections.
+{
+  const mkTask = (id, status, seq) => ({ id, goal: id, scope: ['G:/work'], exclusions: [], status, sourceSeq: seq, confirmedSeq: seq, updatedSeq: seq });
+  assert.equal(mergeTaskState(null, mkTask('t1', 'proposed', 2)).status, 'proposed', 'a proposed task must not escalate without confirmation');
+  assert.equal(mergeTaskState(null, mkTask('t2', 'active', 5)).status, 'active', 'an active task must come back active from the projection after a restart');
+  assert.equal(mergeTaskState(mkTask('t3', 'closed', 6), mkTask('t3', 'active', 4)).status, 'closed', 'a closed task must not revive from a stale active projection');
+  assert.equal(mergeTaskState(mkTask('t3b', 'closed', 6), null), null, 'a closed task must stay closed when the projection is gone');
+  assert.equal(mergeTaskState(mkTask('t-old', 'active', 3), mkTask('t-new', 'active', 9)).id, 't-new', 'a newer active task must replace the older live task');
+  assert.equal(mergeTaskState(mkTask('t-old2', 'active', 9), mkTask('t-new2', 'proposed', 4)).id, 't-old2', 'an older proposal must not replace the active task');
+  assert.equal(mergeTaskState(mkTask('t5', 'proposed', 3), mkTask('t5', 'active', 4)).status, 'active', 'a confirmed task must upgrade the live proposal');
+}
 console.log("core tests passed");

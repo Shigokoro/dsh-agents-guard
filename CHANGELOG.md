@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.9
+
+- Load the persisted memory index before the card is built. `loadPersistedMemory` was only called from `agents_index`, so a fresh process, or a turn after the in-memory map was gone, injected a card that dropped every entry already on disk. `injectCard` now calls it before `buildCard`, and the read is synchronous (`fsSync.readFileSync`) so the card is complete when the host renders it; an async version moved the injection mark past the await and broke two existing timing assertions (`test/guard.test.mjs:118`, `test/guard.test.mjs:214`).
+- Retry a failed index read. The already-loaded flag was set before the read, so one failure poisoned the session for good. It is set now only when the read succeeds or the file is missing; any other error lands in `persistedErrors`, the card is still injected without the missing entries, and the next turn retries.
+- Report persistence only after it happened. `agents_memory` pushed the entry and returned `ok: true` while `writeIndex` ran fire-and-forget, so a failed or suppressed write still looked saved. It now awaits `writeIndex` with a 2 s cap and returns `persisted`, `stored`, `file`, and `error`; `ok` is false when the write failed. With `writeIndex: false` the note says the entry is session only and will not survive a restart.
+- Recover the task from the projection instead of an empty cache. `syncLiveTask` now goes through `mergeTaskState(live, projected)` in `lib/core.mjs`: a closed task is never revived by a stale active projection, an old proposal never displaces a confirmed task, and with no live entry the gate reads `state.task` (`lib/index.mjs:196-198`).
+- Regressions: A7 (a memory entry written to disk is in the next turn card after a simulated restart; a failed write does not claim persistence; a failed read retries on the next turn) and A8 (the five restart scenarios plus seven `mergeTaskState` cases, including a gate decision with an empty live cache). `npm run check` and `npm test` pass (`core`, `guard`, `client`).
+- Version bumped to 0.8.9.
+
 ## 0.8.8
 
 - Fix settings values never reaching the running Guard. The settings page writes the plugin entry config (`entry.options.config`), but `syncConfig` only used a `settings.describe()` row and otherwise fell back to the object captured when the plugin was mounted. Saving a gate or a threshold therefore looked successful and changed nothing. Config resolution now goes through one pure helper, `configSourceChain({ entry, live, raw })`, with the precedence entry > settings document > mount snapshot > schema default; an empty object counts as "no override" so a lower layer or the schema default still applies.

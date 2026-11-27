@@ -1,6 +1,6 @@
 # dsh-agents-guard
 
-> **验证状态（0.8.8）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
+> **验证状态（0.8.9）：未完全验证。** 已验证/未验证项见 [docs/UNVERIFIED.md](docs/UNVERIFIED.md)；未列出不等于保证。
 
 > DSH Host 插件：确定性会话索引 + 压缩前拦截 + 思考疑问/风险闸门。折叠逻辑不调用 LLM；风险出现时可一次性调用当前模型做独立审查。
 

@@ -135,6 +135,18 @@ Recall-first recognition accepts one embedded safe `agents_index` call in a read
 
 `agents_check` is projected only when `add` is exactly one safe `run_code` call. Calling `add` and `status` in the same program does not project the add because the host sees one outer `run_code` result, not the nested calls. The tool description states this boundary; the ledger semantics are unchanged.
 
+## 0.8.9 memory closure and task recovery
+
+Memory lives in three places and only one of them is authoritative across a restart: the `agentsGuardMemory` session projection, the in-process `runtimeMemory` map, and `$DSH_HOME/agent-context/<sessionId>/AGENT_CONTEXT_INDEX.md`. 0.8.9 makes the disk index the recovery source for the injected card and keeps the other two as caches in front of it.
+
+Reading: `injectCard` calls `loadPersistedMemory(session)` before `buildCard`, so every new turn starts from the entries on disk plus whatever the projection and the runtime map already hold for that session. The read is synchronous on purpose. An async load put `markInjected` behind an await, which produced two failures in the existing suite: a card older than the latest user message was let through below 80% (`test/guard.test.mjs:118`), and the first turn start stopped injecting synchronously (`test/guard.test.mjs:214`). A synchronous read of a few kilobytes once per session is the cheaper contract.
+
+Failure handling: `persistedLoaded` is set only when the read succeeded or the file does not exist. Any other error is stored in `persistedErrors` and reported through a warn log, the card for that turn is still injected (without the missing entries), and the next turn reads again, so one bad read no longer disables the session. This replaces the previous behaviour where the flag was set before the read.
+
+Writing: `writeIndex` returns a result object (`written`, `file`, `reason`, `error`) and never rejects, and `agents_memory` awaits it with a 2 s cap before answering. A session whose index cannot be written gets `ok: false` with `persisted: false` and the error text, instead of a success that only updated memory. When `writeIndex` is off the note says the entry is session only and will not survive a restart.
+
+Tasks: the projection `state.task` is the recovery source. `mergeTaskState(live, projected)` keeps a closed task closed, lets an active projection upgrade a proposed or older live entry, keeps a live closed task over a stale active projection, and returns the projection when no live entry exists. The gate reads `stateWithLiveTask`, which falls back to `state.task` (`lib/index.mjs:196-198`), so a lost in-memory cache does not silently open the task gate.
+
 ## 0.8.8 live config chain
 
 The settings page writes the plugin entry config (`entry.options.config`); it does not create a `settings.yaml`. Until 0.8.8 `syncConfig` used `readSettingsValues()` only when `settings.describe()` returned a row for the namespace and otherwise fell back to the object captured during `apply`. A saved gate or threshold was therefore written to the profile patch while the running Guard kept the mount-time value: the page reported success, a write that should have been blocked still ran, and nothing in the output said which value was live.

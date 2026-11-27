@@ -1,7 +1,7 @@
-# 未验证声明（0.8.8）
+# 未验证声明（0.8.9）
 
-> 本文件是 0.8.8 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.8；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.9 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.9；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -35,6 +35,9 @@
 - 0.8.8 配置热生效 live（2026-11-28 本机，双向对照）：`taskGate: true` 时 scope 外 `tools.write` 被拒（`target is outside the active task scope`）；用户在设置页把 `taskGate` 关掉保存后，同一工具写同一目录（`.tmp/guard-a5-probe2.txt`）立即放行。两次调用之间 `lib/index.mjs`（2026-11-27T15:57:15Z）、`lib/core.mjs`（2026-11-27T16:02:31Z）未改，`agents_handoff action=status` 仍报 `build: "0.8.8"`，窗口内没有任何重挂载 ⇒ 配置改动即时生效。
 - 0.8.8 代码热加载（2026-11-28 本机，经 DSH HMR）：profile 配 `hmr` 监听根（`base` + `root: ["."]`）后，源码改写使运行实例从 `build: "0.8.7"` 变为 `build: "0.8.8"`，未重启 DSH；重载窗口内一次 `run_code` 观察到 `tools.agents_handoff is not a function`，下一步恢复 10 个 `agents_*` 工具。未配置监听根时只监听配置，源码改动不生效。
 
+- 0.8.9 记忆闭环（2026-11-28，容器内，`test/guard.test.mjs`）：`DSH_HOME` 指向临时目录，`agents_memory add` 返回 `ok: true`、`persisted: true`，磁盘生成 `agent-context/s-memory-write/AGENT_CONTEXT_INDEX.md` 且含该条目；把同一文件复制成另一会话的索引后只触发 `turn/start`，注入卡片仍含该条目（等价于重启后从磁盘恢复）。写失败用同名路径建成目录触发 `EISDIR`：返回 `ok: false`、`persisted: false`、`error` 非空，note 不声称已持久。读失败同样用目录模拟：首轮卡片注入但不含该条目，删掉目录并放入真实索引后第二轮注入含该条目，证明读取失败会重试。
+- 0.8.9 任务恢复（2026-11-28，容器内）：`mergeTaskState` 七个用例覆盖 proposed 不升级、active 从投影恢复、closed 不被陈旧 active 复活、投影消失后 closed 视为无任务、更新的 active 覆盖旧 live、旧 proposal 不覆盖 active、proposed→active 由投影升级。`test/guard.test.mjs` 的集成块在没有任何 liveTasks 条目的前提下让 Gate 按 `projected.task` 判定：proposed 与 closed 拒绝写入，active 在 scope 内放行、scope 外拒绝。
+- liveTasks 丢失时 Gate 的判定来源：`lib/index.mjs:196-198` 的 `stateWithLiveTask` 在没有 live 条目时直接返回投影 state，门读到的是 `state.task`；`mergeTaskState` 只决定 live 与投影谁更权威，不会凭空造出任务。
 ## 未验证
 
 1. **真实 75% tokenMeter 提醒**：本次会话未达到 75% 阈值，未观察到真实注入。只有 guard 单测、core 场景和 `self_test` 覆盖。
@@ -54,6 +57,11 @@
 11. **0.8.5 的 live 压缩重放**：多调用 handoff 投影与卡片 seq 标记的修复只有 core 回归与本地 check/test；0.8.4 在真实会话里两次压缩被拒（`continuityGate ... missing: next`、`the index card covers user seq 740 but the latest user message is seq 1405`）是修复依据，但 0.8.5 尚未在重载后的 Host 上实测一次真实 compress 通过。
 12. **0.8.6 的 live 压缩重放**：handoff 持久化链路（sidecar、live/投影/落盘合并、混合程序的 handoff 投影、0.75 阈值）已由 core 回归覆盖，`npm run check` 与 `npm test` 全绿；但直到本文件更新时，Guard 尚未重载并重新启用，因此「保存 handoff 后真实 compress 通过」仍未验证。这是 0.8.6 发布后必须补做的一步。
 
+13. **真实 DSH 重启后的任务五场景**：0.8.9 的 A8 只在测试容器里用投影与 `mergeTaskState` 复现；没有重启 DSH 后逐条核对真实会话中 proposed/active/closed 的恢复。真实投影由宿主重建，与测试里手写的 `state.task` 可能不同。
+14. **同步读盘的开销**：`injectCard` 现在每个会话同步读一次 `AGENT_CONTEXT_INDEX.md`（之后命中缓存）。文件大小与首轮注入延迟没有实测；大索引（数百 KB）下是否可接受未知。
+15. **代码改动的热加载**：0.8.8 已取得实测反例（磁盘 0.8.8、运行实例仍报 0.8.7，见「已验证」中 0.8.8 代码热加载反例）。仍未验证的是：除重启 DSH 外，是否存在更轻量的重挂载入口（例如关闭再启用该 bundle 条目）能让新代码生效。
+16. **`run_code` 的 task scope 缺口**：`taskPathOf` 只读取 `file_path` / `path` / `filename`，带写入的 `run_code` 目标为空，`decideTask` 因此跳过 scope 与 exclusion 检查（`lib/core.mjs:2421`）。这是已确证的边界，本轮按范围约束未修；`run_code` 的实际写入不受任务范围审计。
+
 ## 复现
 
 ```powershell
@@ -67,5 +75,4 @@ npm test
 ## 声明边界
 
 Guard 的任务/证据/影响/验证/恢复/索引/接续门控是工作流账本与启发式约束，不是安全认证，也不是完整沙箱。缺依赖时的降级只保证“不硬失败/不假装具备该能力”，不保证在缺少能力时仍能保护上下文或完成压缩。不能把本文件中的“已验证”理解为对全部功能、全部平台或全部插件组合的保证。
-6. **代码改动的热加载**：0.8.8 已取得实测反例（见「已验证」最后一条：磁盘 0.8.8、运行实例仍报 0.8.7）。仍未验证的是：除重启 DSH 外，是否存在更轻量的重挂载入口（例如关闭再启用该 bundle 条目）能让新代码生效。
-7. **`run_code` 的 task scope 缺口**：`taskPathOf` 只读取 `file_path` / `path` / `filename`，带写入的 `run_code` 目标为空，`decideTask` 因此跳过 scope 与 exclusion 检查（`lib/core.mjs:2421`）。这是已确证的边界，本轮按范围约束未修；`run_code` 的实际写入不受任务范围审计。
+

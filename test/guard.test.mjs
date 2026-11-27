@@ -50,13 +50,13 @@ function makeWorkspaceFiles() {
   };
 }
 
-function harness({ pressureTokens, contextWindow, state, reasoningState, agent, fileService }) {
+function harness({ pressureTokens, contextWindow, state, reasoningState, agent, fileService, sessionId = 's1' }) {
   let guard;
   let readBytes = 0;
   const registered = {};
   const handlers = {};
-  const session = { id: 's1', header: { cwd: 'C:/work' } };
-  const riskState = reasoningState || emptyReasoningState({ id: 's1', cwd: 'C:/work' });
+  const session = { id: sessionId, header: { cwd: 'C:/work' } };
+  const riskState = reasoningState || emptyReasoningState({ id: sessionId, cwd: 'C:/work' });
   const baseFiles = fileService === undefined ? makeWorkspaceFiles() : fileService;
   const files = baseFiles ? Object.assign({}, baseFiles, {
     async readBytes(scope, target, options) {
@@ -173,6 +173,7 @@ const memoryNoteTool = h.getTools().agents_memory;
 assert.ok(memoryNoteTool, 'agents_memory must be registered');
 const memoryNote = await memoryNoteTool.execute({ action: 'add', kind: 'requirement', text: 'distilled conclusion' }, { agent: { id: 's1' } });
 assert.match(memoryNote.note, /writeIndex is off|not updated/, 'memory-off note must not claim an index write');
+assert.match(memoryNote.note, /will not survive a restart/, 'memory-off note must state that the entry is session-only');
 
 const recoveryState = makeState();
 recoveryState.changes = [{ id: 'chg-test', target: 'C:/work', invariants: ['keep'], status: 'planned' }];
@@ -318,5 +319,84 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
   const planStatus = await tools.agents_task.execute({ action: 'status' }, { agent: { id: 's1' } });
   assert.ok(planStatus.authorization.taskId, 'the step plan status must have a task id');
   assert.deepEqual(planStatus.task.steps, ['S1', 'S2', 'S3'], 'the step plan must survive in the live status');
+}
+
+// A7: the on-disk index must feed the card of a restarted process.
+{
+  const fsSync = await import('node:fs');
+  const os = await import('node:os');
+  const home = fsSync.mkdtempSync(path.join(os.tmpdir(), 'guard-memory-'));
+  const previousHome = process.env.DSH_HOME;
+  try {
+    process.env.DSH_HOME = home;
+    const writerId = 's-memory-write';
+    const writer = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), sessionId: writerId });
+    await apply(writer.ctx, { writeIndex: true });
+    const note = await writer.getTools().agents_memory.execute({ action: 'add', kind: 'requirement', text: 'durable memory sentinel' }, { agent: { id: writerId } });
+    assert.equal(note.ok, true, 'a successful index write must report ok');
+    assert.equal(note.persisted, true, 'ok must mean the entry reached the disk');
+    const written = path.join(home, 'agent-context', writerId, 'AGENT_CONTEXT_INDEX.md');
+    assert.ok(fsSync.existsSync(written), 'agents_memory must write the index before reporting success');
+    const onDisk = fsSync.readFileSync(written, 'utf8');
+    assert.match(onDisk, /durable memory sentinel/);
+    assert.match(onDisk, /## LLM 记录/, 'the written index must carry the LLM memory section');
+
+    // Simulate a fresh process: the only copy of the memory is that file.
+    const readerId = 's-memory-read';
+    const readerDir = path.join(home, 'agent-context', readerId);
+    fsSync.mkdirSync(readerDir, { recursive: true });
+    fsSync.copyFileSync(written, path.join(readerDir, 'AGENT_CONTEXT_INDEX.md'));
+    const cards = [];
+    const reader = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), sessionId: readerId, agent: { inject(payload) { cards.push(payload && payload.content && payload.content[0] && payload.content[0].text || ''); } } });
+    await apply(reader.ctx, { writeIndex: true });
+    reader.getHandlers()['session/event'](reader.getSession(), { type: 'turn/start', data: { turn: 1 } });
+    assert.ok(cards.some((text) => text.includes('durable memory sentinel')), 'the first turn of a restarted process must reload the on-disk memory');
+
+    // A failed write must not report success, and must not claim durability.
+    // A directory where the index file belongs makes readFile/writeFile fail
+    // with EISDIR, which is the retryable (non-ENOENT) failure path.
+    const failingId = 's-memory-fail';
+    fsSync.mkdirSync(path.join(home, 'agent-context', failingId, 'AGENT_CONTEXT_INDEX.md'), { recursive: true });
+    const failing = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), sessionId: failingId });
+    await apply(failing.ctx, { writeIndex: true });
+    const failed = await failing.getTools().agents_memory.execute({ action: 'add', kind: 'decision', text: 'cannot be written' }, { agent: { id: failingId } });
+    assert.equal(failed.ok, false, 'a failed index write must not report ok');
+    assert.equal(failed.persisted, false, 'a failed write must not claim durability');
+    assert.ok(failed.error, 'a failed write must surface the error');
+    assert.match(failed.note, /not durable|write failed/, 'the note must not claim the entry survives a restart');
+
+    // A failed read must stay retryable: the next turn picks the memory up.
+    const retryId = 's-memory-retry';
+    const retryFile = path.join(home, 'agent-context', retryId, 'AGENT_CONTEXT_INDEX.md');
+    fsSync.mkdirSync(retryFile, { recursive: true });
+    const retryCards = [];
+    const retry = harness({ pressureTokens: 10000, contextWindow: 100000, state: makeState(), sessionId: retryId, agent: { inject(payload) { retryCards.push(payload && payload.content && payload.content[0] && payload.content[0].text || ''); } } });
+    await apply(retry.ctx, { writeIndex: true });
+    retry.getHandlers()['session/event'](retry.getSession(), { type: 'turn/start', data: { turn: 1 } });
+    assert.ok(retryCards.length > 0, 'the card must still be injected when the index read fails');
+    assert.ok(!retryCards.some((text) => text.includes('durable memory sentinel')), 'a failed read cannot show memory it never read');
+    fsSync.rmSync(retryFile, { recursive: true, force: true });
+    fsSync.copyFileSync(written, retryFile);
+    retry.getHandlers()['session/event'](retry.getSession(), { type: 'turn/start', data: { turn: 2 } });
+    assert.ok(retryCards.some((text) => text.includes('durable memory sentinel')), 'a failed read must be retried and reach the next card');
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome;
+    fsSync.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+// A8: with no live task cache the gate must read the authoritative projection.
+{
+  const projected = makeState();
+  projected.task = { id: 'task-projected', goal: 'projected scope', scope: ['C:/work/projected'], exclusions: [], status: 'proposed', sourceSeq: 2, confirmedSeq: 0, updatedSeq: 0 };
+  const h8 = harness({ pressureTokens: 10000, contextWindow: 100000, state: projected, sessionId: 's-task-a8' });
+  await apply(h8.ctx, { taskGate: true });
+  const gateFor = (file) => h8.getGuard()({ name: 'write', agent: { id: 's-task-a8' }, arguments: { file_path: file } });
+  assert.ok(gateFor('C:/work/projected/x.txt'), 'a proposed task is not authorization');
+  projected.task.status = 'active';
+  assert.equal(gateFor('C:/work/projected/x.txt'), undefined, 'an active projected task must authorize its own scope without a live cache');
+  assert.ok(gateFor('C:/work/other/x.txt'), 'the projected scope must still be enforced');
+  projected.task.status = 'closed';
+  assert.ok(gateFor('C:/work/projected/x.txt'), 'a closed projected task must not authorize writes');
 }
 console.log('guard tests passed');
