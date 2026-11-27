@@ -253,6 +253,9 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
   assert.equal(closed.task.status, 'closed');
   const denied = h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/x.txt' } });
   assert.ok(denied && /taskGate/.test(denied.reason), 'close must take effect before the next tool call, not after the program ends');
+  h.getHandlers()['session/event'](h.getSession(), { type: 'turn/start', data: { turn: 1 } });
+  const stillDenied = h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/x.txt' } });
+  assert.ok(stillDenied && /taskGate/.test(stillDenied.reason), 'a stale active projection must not revive a closed live task');
 }
 
 // Starting and confirming a new scope in one program must replace the old scope immediately.
@@ -262,11 +265,21 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
   h = harness({ pressureTokens: 10000, contextWindow: 100000, state });
   await apply(h.ctx, { taskGate: true });
   const tools = h.getTools();
-  await tools.agents_task.execute({ action: 'start', goal: 'new scope', scope: ['C:/work/new'] }, { agent: { id: 's1' } });
+  const started = await tools.agents_task.execute({ action: 'start', goal: 'new scope', scope: ['C:/work/new'] }, { agent: { id: 's1' } });
+  assert.ok(started.task.id, 'start must return a stable task id');
+  const startedStatus = await tools.agents_task.execute({ action: 'status' }, { agent: { id: 's1' } });
+  assert.equal(startedStatus.authorization.taskId, started.task.id, 'status must expose the proposed task id');
   const confirmed = await tools.agents_task.execute({ action: 'confirm' }, { agent: { id: 's1' } });
   assert.equal(confirmed.task.status, 'active');
+  assert.ok(confirmed.task.id, 'confirm must preserve the task id');
+  const activeStatus = await tools.agents_task.execute({ action: 'status' }, { agent: { id: 's1' } });
+  assert.equal(activeStatus.authorization.taskId, confirmed.task.id, 'status must expose the active task id');
+  assert.ok(activeStatus.authorization.taskId, 'status authorization must never contain an undefined task id');
   assert.equal(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/new/x.txt' } }), undefined, 'the new scope must be active immediately');
   assert.ok(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/old/x.txt' } }), 'the old scope must not survive the update');
+  state.task = { id: 'task-stale-projection', goal: 'stale projection', scope: ['C:/work/new'], exclusions: [], status: 'proposed', sourceSeq: 2, confirmedSeq: 0, updatedSeq: 0 };
+  h.getHandlers()['session/event'](h.getSession(), { type: 'turn/start', data: { turn: 1 } });
+  assert.equal(h.getGuard()({ name: 'write', agent: { id: 's1' }, arguments: { file_path: 'C:/work/new/x.txt' } }), undefined, 'a stale proposed projection must not clear the live active task');
 }
 
 // Continuity: threshold reminder, handoff tool, and step plan.
@@ -297,8 +310,10 @@ assert.ok(liveHarness.getGuard()({ name: 'write', agent: { id: 's1' }, arguments
   assert.equal(cleared.ok, true);
   assert.equal((await tools.agents_handoff.execute({ action: 'status' }, { agent: { id: 's1' } })).status, 'missing');
   const plan = await tools.agents_task.execute({ action: 'start', goal: 'ship', scope: ['C:/work'], steps: ['S1', 'S2', 'S3'] }, { agent: { id: 's1' } });
+  assert.ok(plan.task.id, 'a step plan must have a stable task id');
   assert.deepEqual(plan.task.steps, ['S1', 'S2', 'S3']);
   const planStatus = await tools.agents_task.execute({ action: 'status' }, { agent: { id: 's1' } });
+  assert.ok(planStatus.authorization.taskId, 'the step plan status must have a task id');
   assert.deepEqual(planStatus.task.steps, ['S1', 'S2', 'S3'], 'the step plan must survive in the live status');
 }
 console.log('guard tests passed');

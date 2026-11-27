@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3
+
+- Fix settings hot-apply: `normalizeConfig` previously overlaid the settings user layer only for the four group switches, so saving a child gate such as `taskGate`, `recallGate`, or `developerMode` wrote the user layer while the running Guard kept the old profile value. The whole explicit user layer is now overlaid before boolean normalization and group derivation; group precedence is unchanged.
+- `readSettingsValues` now returns the live settings row even when its value layer is absent, so a user-only save reaches `syncConfig`. The client `readDraft` merges the value and user layers; a user-only configuration is no longer rendered as unavailable, and the hints say the next guarded call reads the new values.
+- Live verification on the running Host: setting `taskGate=true` through the live settings row made the very next write fail with `target is outside the active task scope` and created no file; writing `false` immediately allowed the next write. This proves child values from the settings user layer take effect without a plugin reload. An actual authenticated settings-page click remains unverified.
+- Add a core regression for an explicit user child override. `npm run check` and `npm test` pass (`core`, `guard`, `client`).
+
 ## 0.8.2
 
 - Fix `agents_recovery action=baseline`: `changeId` is now required and must name an existing planned/applied change; an unbound baseline is rejected instead of silently returned. The recovery gate already required a matching change, so this closes the gap between tool success and gate usability.

@@ -169,6 +169,12 @@ assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { expli
 assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { explicit: { workflowEnabled: false } }).workflowEnabled, false, 'an explicit user group choice must win');
 assert.equal(normalizeConfig({ workflowEnabled: false, taskGate: true }, { explicit: { workflowEnabled: true } }).workflowEnabled, true, 'an explicit user on must win even when the value layer says off');
 assert.equal(normalizeConfig({ workflowEnabled: true, taskGate: true }, { explicit: { workflowEnabled: null } }).workflowEnabled, false, 'a null explicit group must not silently count as on');
+const userChildOverride = effectiveConfig(
+  { workflowEnabled: false, taskGate: false, evidenceGate: false, impactGate: false, verificationGate: false, recoveryGate: false },
+  { explicit: { taskGate: true } },
+);
+assert.equal(userChildOverride.taskGate, true, 'a child saved in the settings user layer must override the value/profile layer');
+assert.equal(userChildOverride.workflowEnabled, true, 'a user-layer child must also derive its group on when no group field is set');
 const groupOff = effectiveConfig({ workflowEnabled: false, taskGate: true, evidenceGate: true, maxEvidence: 7 });
 assert.equal(groupOff.taskGate, false, 'effective workflow child must be paused');
 assert.equal(groupOff.evidenceGate, false, 'every workflow child must be paused');

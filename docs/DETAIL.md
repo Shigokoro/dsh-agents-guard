@@ -115,6 +115,10 @@ agents_memory writes a runtime entry and calls the Markdown writer immediately. 
 
 Each agents_memory entry is host-classified as model-inferred or assumption. The tool no longer accepts model-supplied source or authority, so the model cannot claim user-confirmed or tested. User messages are indexed as user-stated. The label is provenance, not independent verification.
 
+## 0.8.3 settings hot-apply
+
+`normalizeConfig` overlays the entire explicit settings user layer before normalization and group derivation; previously only the four group switches were read from that layer. `readSettingsValues` returns a settings row even when its value layer is absent, and `syncConfig` passes the user layer to `effectiveConfig`. The client `readDraft` merges value and user and treats the form as unavailable only when both are absent. A live `taskGate` toggle through the settings row changed the next write's result without a reload; an authenticated settings-page click remains unverified.
+
 ## 0.8.2 fixes
 
 `agents_recovery action=baseline` requires a `changeId` that names an existing change; an unbound baseline is rejected. The recovery gate already matched the current change, so this prevents a successful tool call from producing a baseline that cannot authorize the intended write. The recovery projection still records only the bound change.
