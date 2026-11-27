@@ -1,7 +1,7 @@
-# 未验证声明（0.8.7）
+# 未验证声明（0.8.8）
 
-> 本文件是 0.8.7 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.7；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.8 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.8；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -29,6 +29,9 @@
 
 - 0.8.7 挂载登记（2026-11-27 本机真实 profile）：用 DSH 自己的 `composeEntries`/`loadOverlayPatches` 组合真实 profile，改前 211 条、`agents-guard` 0 条并出现 `compose: patch: entry "agents-guard" not found`；把 `@local/dsh-agents-guard` 加进 `dsh.profile.bundles` 后 212 条、`agents-guard` 1 条（`name: @local/dsh-agents-guard`、无 config 键），guard 相关告警 0。随后无需重启，`tools.agents_*` 出现、`agents_handoff action=status` 返回 `build: 0.8.6`。
 - 0.8.6 真实压缩链路（2026-11-27 本会话 live）：`agents_handoff action=save` 返回 `status: ready`、`savedSeq 3314`、`coveredUserSeq 3314`、`build 0.8.6`，同一 `run_code` 程序内紧接着的 `compress` 成功（208247 tokens，2 个块）。这正是 0.8.5 失败、且无 handoff 时被 `continuityGate` 拒绝的同一条路径。
+
+- 0.8.8 配置链单测（2026-11-28）：`configSourceChain` 的优先级 entry > settings > mount > default 全部断言通过；空对象不算来源（`{ entry: {} }` 回退 default）；显式 user 层透传；`GUARD_BUILD` 与 `package.json` 一致。`npm run check` 与 `npm test`（core/guard/client）全绿。
+- 0.8.8 代码热加载反例（2026-11-28 本机 live）：`lib/core.mjs` 的 `GUARD_BUILD` 已改为 `0.8.8`、磁盘 `package.json` 也是 `0.8.8`，但运行中的 guard `agents_handoff action=status` 仍返回 `build: "0.8.7"`。⇒ 代码改动不热加载，必须重新挂载（重启 DSH 或关闭再启用该条目）。
 
 ## 未验证
 
@@ -62,4 +65,5 @@ npm test
 ## 声明边界
 
 Guard 的任务/证据/影响/验证/恢复/索引/接续门控是工作流账本与启发式约束，不是安全认证，也不是完整沙箱。缺依赖时的降级只保证“不硬失败/不假装具备该能力”，不保证在缺少能力时仍能保护上下文或完成压缩。不能把本文件中的“已验证”理解为对全部功能、全部平台或全部插件组合的保证。
-6. **代码改动的热加载**：本机 DSH 存在 `dsh-hmr`（`hmr/change`、`hmr/reload`、`watchConfig`），但 guard 的 `lib/*.mjs` 改动是否需要重新挂载没有实测确认；0.8.7 结论（配置热、代码需重挂载）来自 `apply()` 每次挂载只执行一次与 ESM 模块缓存，不是实测的反例。
+6. **代码改动的热加载**：0.8.8 已取得实测反例（见「已验证」最后一条：磁盘 0.8.8、运行实例仍报 0.8.7）。仍未验证的是：除重启 DSH 外，是否存在更轻量的重挂载入口（例如关闭再启用该 bundle 条目）能让新代码生效。
+7. **0.8.8 入口配置读取的真实效果**：修复后「设置页写条目 config → 下一次门控调用即生效」尚未在重启后的真实会话验证。验证方法：重启后 `agents_handoff action=status` 应报 `build: "0.8.8"`，且已保存的 `taskGate: true` 应让下一次写入被拒绝；再用设置页切换一个门控观察是否无需重启。

@@ -135,6 +135,14 @@ Recall-first recognition accepts one embedded safe `agents_index` call in a read
 
 `agents_check` is projected only when `add` is exactly one safe `run_code` call. Calling `add` and `status` in the same program does not project the add because the host sees one outer `run_code` result, not the nested calls. The tool description states this boundary; the ledger semantics are unchanged.
 
+## 0.8.8 live config chain
+
+The settings page writes the plugin entry config (`entry.options.config`); it does not create a `settings.yaml`. Until 0.8.8 `syncConfig` used `readSettingsValues()` only when `settings.describe()` returned a row for the namespace and otherwise fell back to the object captured during `apply`. A saved gate or threshold was therefore written to the profile patch while the running Guard kept the mount-time value: the page reported success, a write that should have been blocked still ran, and nothing in the output said which value was live.
+
+0.8.8 resolves config through one pure helper, `configSourceChain({ entry, live, raw })`, with the precedence entry config > settings document > mount snapshot > schema default. An empty object is treated as absent, so an empty entry falls through to the mount snapshot instead of silently disabling every override; `explicit` (the user layer the settings document reports) is passed through unchanged. `syncConfig` calls the helper on mount and on every refresh event (`settings/document-updated`, `settings/changed`, `config/changed`, `app-boot/config-reload`, `loader/volatile-update`), so a value change applies without a reload, while a code change still needs a re-mount because `apply` runs once and ESM modules are cached.
+
+Diagnostics: `agents_handoff action=status` and the developer status report `configSource`, and `DSH_GUARD_CONFIG_DUMP=<path>` writes one JSON snapshot with `build`, `from`, `entryFound`, `liveFound` and the gate values, so a live mismatch is attributed to a layer instead of guessed.
+
 ## 0.8.7 bundle registration
 
 The profile composes an empty entry list, then applies each bundle patch in `dsh.profile.bundles` order, then the profile `cordis.patch.yml`, then launcher overlays. `applyEntryPatches` treats a layer entry without `insert` as an override: it requires an existing id, warns `patch: entry %C not found` and skips when the id is absent, and warns `patch: name mismatch` when the name differs. A plugin that is installed as a dependency but only mentioned as a top-level profile entry therefore never enters the tree.
