@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.8
+
+- Fix settings values never reaching the running Guard. The settings page writes the plugin entry config (`entry.options.config`), but `syncConfig` only used a `settings.describe()` row and otherwise fell back to the object captured when the plugin was mounted. Saving a gate or a threshold therefore looked successful and changed nothing. Config resolution now goes through one pure helper, `configSourceChain({ entry, live, raw })`, with the precedence entry > settings document > mount snapshot > schema default; an empty object counts as "no override" so a lower layer or the schema default still applies.
+- Return the winning layer. `agents_handoff`/status and the developer status report `configSource`, and `DSH_GUARD_CONFIG_DUMP=<path>` writes one JSON snapshot (`build`, `from`, `entryFound`, `liveFound`, gate values) so a live mismatch can be attributed to a layer instead of guessed.
+- Add a regression for the precedence chain: the live entry config wins over the settings row and the mount snapshot, an empty entry falls through, the mount snapshot survives when the entry is absent, and an empty entry object is not treated as a source. `npm run check` and `npm test` pass (`core`, `guard`, `client`).
+- Version bumped to 0.8.8.
+
 ## 0.8.7
 
 - Register the plugin as a DSH bundle instead of as a top-level profile patch entry. `package.json` already declared `dsh.bundle.patch`, but the profile listed `agents-guard` as a top-level patch entry, and a top-level entry can only override an existing node: DSH reported `compose: patch: entry "agents-guard" not found` and never inserted the plugin. The documented install step is now "add `@local/dsh-agents-guard` to `dsh.profile.bundles`"; composing the real profile with DSH own `composeEntries` yields one `agents-guard` entry (`name: @local/dsh-agents-guard`) with no guard warnings.

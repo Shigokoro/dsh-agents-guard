@@ -11,6 +11,7 @@ import {
   embeddedLedgerCalls,
   embeddedHandoffCall,
   GUARD_BUILD,
+  configSourceChain,
   pickHandoff,
   handoffHasNext,
   advanceInjectedMark,
@@ -1033,6 +1034,34 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
 
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 assert.equal(GUARD_BUILD, packageVersion, 'GUARD_BUILD must match package.json so a live status can prove which build is running');
+
+// The live entry config (what the settings page writes) must beat the mount-time snapshot.
+{
+  const entry = { workflowEnabled: true, compressPressureRatio: 0.7 };
+  const live = { value: { compressPressureRatio: 0.9, taskGate: true }, user: { taskGate: true } };
+  const raw = { compressPressureRatio: 0.75, writeIndex: false };
+
+  const fromEntry = configSourceChain({ entry, live, raw });
+  assert.equal(fromEntry.from, 'entry');
+  assert.equal(fromEntry.values.compressPressureRatio, 0.7, 'the entry config is the live value the settings page writes');
+  assert.equal(fromEntry.values.workflowEnabled, true);
+  assert.deepEqual(fromEntry.explicit, { taskGate: true }, 'explicit fields still come from the saved document');
+
+  const noEntry = configSourceChain({ entry: null, live, raw });
+  assert.equal(noEntry.from, 'settings');
+  assert.equal(noEntry.values.compressPressureRatio, 0.9);
+
+  const noLive = configSourceChain({ entry: undefined, live: null, raw });
+  assert.equal(noLive.from, 'mount');
+  assert.equal(noLive.values.compressPressureRatio, 0.75, 'a value present only in the mount snapshot survives');
+  assert.deepEqual(noLive.explicit, null);
+
+  const nothing = configSourceChain({});
+  assert.equal(nothing.from, 'default');
+  assert.deepEqual(nothing.values, {}, 'no source means no override: the schema defaults apply');
+
+  assert.equal(configSourceChain({ entry: {} }).from, 'default', 'an empty entry object is not a source');
+}
 
 // Card marks advance by user seq even when the turn value lags.
 {
