@@ -32,6 +32,8 @@
 
 - 0.8.8 配置链单测（2026-11-28）：`configSourceChain` 的优先级 entry > settings > mount > default 全部断言通过；空对象不算来源（`{ entry: {} }` 回退 default）；显式 user 层透传；`GUARD_BUILD` 与 `package.json` 一致。`npm run check` 与 `npm test`（core/guard/client）全绿。
 - 0.8.8 代码热加载反例（2026-11-28 本机 live）：`lib/core.mjs` 的 `GUARD_BUILD` 已改为 `0.8.8`、磁盘 `package.json` 也是 `0.8.8`，但运行中的 guard `agents_handoff action=status` 仍返回 `build: "0.8.7"`。⇒ 代码改动不热加载，必须重新挂载（重启 DSH 或关闭再启用该条目）。
+- 0.8.8 配置热生效 live（2026-11-28 本机，双向对照）：`taskGate: true` 时 scope 外 `tools.write` 被拒（`target is outside the active task scope`）；用户在设置页把 `taskGate` 关掉保存后，同一工具写同一目录（`.tmp/guard-a5-probe2.txt`）立即放行。两次调用之间 `lib/index.mjs`（2026-11-27T15:57:15Z）、`lib/core.mjs`（2026-11-27T16:02:31Z）未改，`agents_handoff action=status` 仍报 `build: "0.8.8"`，窗口内没有任何重挂载 ⇒ 配置改动即时生效。
+- 0.8.8 代码热加载（2026-11-28 本机，经 DSH HMR）：profile 配 `hmr` 监听根（`base` + `root: ["."]`）后，源码改写使运行实例从 `build: "0.8.7"` 变为 `build: "0.8.8"`，未重启 DSH；重载窗口内一次 `run_code` 观察到 `tools.agents_handoff is not a function`，下一步恢复 10 个 `agents_*` 工具。未配置监听根时只监听配置，源码改动不生效。
 
 ## 未验证
 
@@ -66,4 +68,4 @@ npm test
 
 Guard 的任务/证据/影响/验证/恢复/索引/接续门控是工作流账本与启发式约束，不是安全认证，也不是完整沙箱。缺依赖时的降级只保证“不硬失败/不假装具备该能力”，不保证在缺少能力时仍能保护上下文或完成压缩。不能把本文件中的“已验证”理解为对全部功能、全部平台或全部插件组合的保证。
 6. **代码改动的热加载**：0.8.8 已取得实测反例（见「已验证」最后一条：磁盘 0.8.8、运行实例仍报 0.8.7）。仍未验证的是：除重启 DSH 外，是否存在更轻量的重挂载入口（例如关闭再启用该 bundle 条目）能让新代码生效。
-7. **0.8.8 入口配置读取的真实效果**：修复后「设置页写条目 config → 下一次门控调用即生效」尚未在重启后的真实会话验证。验证方法：重启后 `agents_handoff action=status` 应报 `build: "0.8.8"`，且已保存的 `taskGate: true` 应让下一次写入被拒绝；再用设置页切换一个门控观察是否无需重启。
+7. **`run_code` 的 task scope 缺口**：`taskPathOf` 只读取 `file_path` / `path` / `filename`，带写入的 `run_code` 目标为空，`decideTask` 因此跳过 scope 与 exclusion 检查（`lib/core.mjs:2421`）。这是已确证的边界，本轮按范围约束未修；`run_code` 的实际写入不受任务范围审计。

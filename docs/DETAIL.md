@@ -143,6 +143,15 @@ The settings page writes the plugin entry config (`entry.options.config`); it do
 
 Diagnostics: `agents_handoff action=status` and the developer status report `configSource`, and `DSH_GUARD_CONFIG_DUMP=<path>` writes one JSON snapshot with `build`, `from`, `entryFound`, `liveFound` and the gate values, so a live mismatch is attributed to a layer instead of guessed.
 
+## 0.8.8 verification: hot config vs hot code (2026-11-28, local desktop profile)
+
+Two paths were measured separately on the same running instance, so the "no reload" claim is not inferred from the code.
+
+**Config change applies without a reload.** With `taskGate: true` in the entry config, a `tools.write` to a path outside the active task scope was denied with `dsh-agents-guard: target is outside the active task scope: G:/AI/dsh_projectWorkArea/.tmp/guard-config-tool.js`. The user then switched `taskGate` off in the settings page and saved; the next call of the same tool to the same directory (`G:/AI/dsh_projectWorkArea/.tmp/guard-a5-probe2.txt`) was allowed. Between the two calls `lib/index.mjs` (2026-11-27T15:57:15Z) and `lib/core.mjs` (2026-11-27T16:02:31Z) were unchanged, and `agents_handoff action=status` still reported `build: "0.8.8"`, so no module re-mount happened in that window. The gate reads the entry config on every guarded call (`syncConfig` at the top of the guard hook), which is why the new value was in force immediately.
+
+**Code change needs a reload, and DSH HMR provides it.** Source edits are picked up by `@deepseek-ai/dsh-hmr` when the profile configures a watched root (`hmr` entry with `base` plus `root: ["."]`); the live instance moved from `build: "0.8.7"` to `build: "0.8.8"` without restarting DSH. A reload window is observable: one `run_code` program saw `tools.agents_handoff is not a function`, and the same session had all ten `agents_*` tools back on the next step. Without a watched root only configuration is watched, so a source edit stays inert until the entry is disabled and re-enabled or DSH restarts.
+
+**Known gap in the same code path.** `taskPathOf` (lib/core.mjs:2399-2403) derives the target only from `file_path`, `path`, or `filename`. A mutating `run_code` carries its path inside `code`, so the target is empty, `decideTask` skips the scope and exclusion checks (lib/core.mjs:2421), and `run_code` writes are effectively unaudited by the task scope. This is recorded as a limitation, not fixed here: changing it would alter the task gate beyond the continuity/threshold scope of this change.
 ## 0.8.7 bundle registration
 
 The profile composes an empty entry list, then applies each bundle patch in `dsh.profile.bundles` order, then the profile `cordis.patch.yml`, then launcher overlays. `applyEntryPatches` treats a layer entry without `insert` as an override: it requires an existing id, warns `patch: entry %C not found` and skips when the id is absent, and warns `patch: name mismatch` when the name differs. A plugin that is installed as a dependency but only mentioned as a top-level profile entry therefore never enters the tree.
