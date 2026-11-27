@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6
+
+- Fix the handoff persistence chain behind `continuityGate requires a current agents_handoff before compression (stale; missing: next)`: a save could report `ready` while the gate read an older projection, because the live value was overwritten by `user/message` bookkeeping, a `null` live value shadowed the projected one, and a batched `run_code` save was dropped when the program also called a non-ledger tool. Continuity now resolves through `pickHandoff([live, projected, persisted])`, the user-message handler no longer writes continuity, and `embeddedHandoffCall` recovers a save from any program that mixes `agents_handoff` with other tools.
+- Persist continuity next to the capsule as `AGENT_CONTINUITY.json` (`<session cwd>`), read back by mtime/size, so a plugin reload or a fresh projection cannot lose the saved handoff. `agents_handoff` now returns `build`, `source` (`live|cleared|projected|persisted|none`) and `projectedStatus`, so a live failure can name the layer that supplied the value.
+- An incomplete save (no `next`) and a `clear` never replace an existing valid handoff with a newer but useless entry; `pickHandoff` prefers valid entries, then the one covering the latest user message.
+- Bump the `agentsGuardMemory` projection `stateVersion` to 5 so sessions rebuild state written by the previous reducer.
+- Default `compressPressureRatio` lowered from 0.8 to 0.75 (config default, settings schema, prompt text); the emergency fallback now fires at 75% of the context window.
+- Add regressions: default and out-of-range ratio are 0.75; 75000/100000 allows while 74999/100000 denies; a mixed `agents_index` + `agents_handoff` program reaches `ready`; an incomplete batched save keeps the previous handoff; `pickHandoff`/`handoffHasNext` ordering; `GUARD_BUILD` matches `package.json`.
+- Version bumped to 0.8.6.
 ## 0.8.5
 
 - Project `agents_handoff` from multi-call `run_code` programs: `embeddedLedgerCalls` now keeps handoff entries (previously only change/check/recovery were projected), and the tool/result reducer applies `handoffEntryFrom` for them. A batched "save handoff + audit + status" program no longer leaves the compress gate reading a stale capsule with `continuityGate requires a current agents_handoff ... missing: next`.

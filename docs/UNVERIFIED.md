@@ -1,7 +1,7 @@
-# 未验证声明（0.8.5）
+# 未验证声明（0.8.6）
 
-> 本文件是 0.8.5 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
-> 适用范围：dsh-agents-guard 0.8.5；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
+> 本文件是 0.8.6 源码的显式未验证声明。它不是安全认证，也不代表所有声明都经过独立复现。
+> 适用范围：dsh-agents-guard 0.8.6；审查包与验证报告见 `docs/REVIEW-0.8.1-20261122.md`；真实会话 live 证据见 `docs/LIVE-TEST-2026-11-22.md`。
 
 ## 已验证
 
@@ -22,14 +22,14 @@
 - 0.8.3 设置热更新 live（2026-11-27）：通过合法 settings API 临时把 `taskGate` 写入 user 层并立即生效：`true` 时下一次写入被拒绝（`target is outside the active task scope`，文件未创建），`false` 时下一次写入立即成功；无需重载。实际设置页点击仍未验证。
 - 0.8.2 live memory-off（2026-11-22）：临时把 `memoryEnabled: false` 写入 profile 并重载后，真实 `agents_memory` 返回 `Recorded in the session memory card; writeIndex is off, so AGENT_CONTEXT_INDEX.md was not updated.`；恢复 profile 后 SHA256 回到 `A0C459...0DCEBC9`，`.tmp/guard-live3` 已删除。
 - `agents_check action=add` 在严格单条安全调用下会投影；`add` 与 `status` 放在同一程序时不会投影，这是既有 single-safe-call 边界，不是 0.8.2 新增限制。
-- 单元测试中的 14 项 `self_test` 通过（含 continuity 的 missing/ready/stale/80% 兜底）。该结果来自测试进程，不是真实会话的 80% 提醒。
+- 单元测试中的 14 项 `self_test` 通过（含 continuity 的 missing/ready/stale/75% 兜底）。该结果来自测试进程，不是真实会话的 80% 提醒。
 - 真实 Host 重载后 `agents_handoff status` 为 `ready`；`AGENT_CONTINUITY.md` 已写入工作区。
 - 接续 ready 后 `compress` 被放行；无接续时同一门控会拒绝压缩。
 - 同程序 `agents_task close` 后写入被 taskGate 拒绝；`agents_handoff` 单条安全调用可写入持久投影；缺少 `SAFE_RUN_CODE_TOOLS` 条目导致的投影丢失已复现并修复。
 
 ## 未验证
 
-1. **真实 80% tokenMeter 提醒**：本次会话未达到 80% 阈值，未观察到真实注入。只有 guard 单测、core 场景和 `self_test` 覆盖。
+1. **真实 75% tokenMeter 提醒**：本次会话未达到 75% 阈值，未观察到真实注入。只有 guard 单测、core 场景和 `self_test` 覆盖。
 2. **设置页真实点击**：没有用浏览器或 UI 自动化点击保存。已检查字段、静态读取、默认值、真实 React 渲染（最小 stand-in）和保存转换；2026-11-22 用无头 Edge 访问本机 Web GUI 时返回 `dsh web authentication required`，没有绕过认证或执行已认证点击；这不等于浏览器 UI 端到端通过。
 2b. **四个总开关的真实桌面 UI 行为**：workflow/continuity 已用合法 settings API、reasoning/memory 已用真实会话临时 profile 验证关闭/恢复与子项副作用；仍未在真实 DSH 桌面设置页点击四组开关并观察所有工具与文件副作用。
 3. **卸载压缩插件的真实 profile**：没有在真实 profile 中卸载上下文压缩插件做端到端矩阵；“无压缩插件”行为来自代码分支、单测、`docs/COMPATIBILITY.md` 与显式错误路径。
@@ -44,6 +44,7 @@
 9. **宿主投影与模型接续文本**：projection 字段是确定性的；`step/next/preserve/discard/risks` 是模型提炼文本，不独立验证。
 10. **`agents_check` 多调用投影边界**：`agents_check add` 只有作为单条安全 `run_code` 调用时才进入投影；同一程序里再调用 `status` 或其他安全工具不会投影 add。账本语义未改，工具描述已说明。
 11. **0.8.5 的 live 压缩重放**：多调用 handoff 投影与卡片 seq 标记的修复只有 core 回归与本地 check/test；0.8.4 在真实会话里两次压缩被拒（`continuityGate ... missing: next`、`the index card covers user seq 740 but the latest user message is seq 1405`）是修复依据，但 0.8.5 尚未在重载后的 Host 上实测一次真实 compress 通过。
+12. **0.8.6 的 live 压缩重放**：handoff 持久化链路（sidecar、live/投影/落盘合并、混合程序的 handoff 投影、0.75 阈值）已由 core 回归覆盖，`npm run check` 与 `npm test` 全绿；但直到本文件更新时，Guard 尚未重载并重新启用，因此「保存 handoff 后真实 compress 通过」仍未验证。这是 0.8.6 发布后必须补做的一步。
 
 ## 复现
 

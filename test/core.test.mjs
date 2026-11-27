@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   buildCard,
   buildRiskReviewPrompt,
@@ -8,6 +9,10 @@ import {
   safeRunCodeCall,
   embeddedToolCalls,
   embeddedLedgerCalls,
+  embeddedHandoffCall,
+  GUARD_BUILD,
+  pickHandoff,
+  handoffHasNext,
   advanceInjectedMark,
   cardMarkCovers,
   decideCompress,
@@ -141,9 +146,9 @@ const forced = decideCompress({ state: undefined, mark: undefined, currentTurn: 
 assert.equal(forced.allow, true);
 assert.equal(forced.forced, true);
 assert.ok(Math.abs(forced.pressureRatio - 0.81) < 1e-9);
-const exactPressure = decideCompress({ state: undefined, mark: undefined, currentTurn: 1, denyCompress: true, pressureTokens: 80000, contextWindow: 100000 });
+const exactPressure = decideCompress({ state: undefined, mark: undefined, currentTurn: 1, denyCompress: true, pressureTokens: 75000, contextWindow: 100000 });
 assert.equal(exactPressure.allow, true);
-const belowPressure = decideCompress({ state: undefined, mark: undefined, currentTurn: 1, denyCompress: true, pressureTokens: 79999, contextWindow: 100000 });
+const belowPressure = decideCompress({ state: undefined, mark: undefined, currentTurn: 1, denyCompress: true, pressureTokens: 74999, contextWindow: 100000 });
 assert.equal(belowPressure.allow, false);
 const customPressure = decideCompress({ state: undefined, mark: undefined, currentTurn: 1, denyCompress: true, pressureTokens: 85000, contextWindow: 100000, compressPressureRatio: 0.9 });
 assert.equal(customPressure.allow, false);
@@ -163,8 +168,9 @@ const cfg = normalizeConfig({ maxCardChars: 0, denyCompress: 'false', legacyComp
 assert.equal(cfg.maxCardChars, 4200);
 assert.equal(cfg.denyCompress, true);
 assert.equal(cfg.legacyCompressWithoutCard, true);
+assert.equal(normalizeConfig({}).compressPressureRatio, 0.75, 'default compression pressure threshold is 0.75');
 assert.equal(normalizeConfig({ compressPressureRatio: 0.75 }).compressPressureRatio, 0.75);
-assert.equal(normalizeConfig({ compressPressureRatio: 1.5 }).compressPressureRatio, 0.8);
+assert.equal(normalizeConfig({ compressPressureRatio: 1.5 }).compressPressureRatio, 0.75, 'an out-of-range ratio falls back to the 0.75 default');
 // Group master switches are separate from the child settings they pause. An
 // old profile without group fields derives its group state from the children;
 // a schema default must not silently enable a group the user never chose.
@@ -974,6 +980,60 @@ assert.equal(cappedEvidence.evidence.length, 2, 'maxEvidence must cap projected 
   assert.equal(ledger.continuity.next, 'resume');
 }
 
+
+// A batched run_code that mixes agents_index with agents_handoff must still project the save,
+// because embeddedToolCalls refuses the whole program once a non-ledger tool is present.
+{
+  const code = [
+    'const a = await tools.agents_index({ action: "status" });',
+    'const h = await tools.agents_handoff({ action: "save", step: "mixed", next: "resume" });',
+    'return { a, h };',
+  ].join('\n');
+  const direct = embeddedHandoffCall(code);
+  assert.ok(direct && direct.action === 'save' && direct.next === 'resume', 'a handoff call must be recovered from a mixed program');
+  let mixed = emptyState({ cwd: 'G:/proj' });
+  mixed.lastUserSeq = 7;
+  mixed = reduceEvent(mixed, { type: 'tool/call', seq: 30, data: { callId: 'mixed', name: 'run_code', arguments: JSON.stringify({ code }) } });
+  mixed = reduceEvent(mixed, { type: 'tool/result', seq: 31, data: { message: { toolCallId: 'mixed', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(continuityStatus(mixed), 'ready', 'a mixed program must still deliver its handoff to the gate');
+  assert.equal(mixed.continuity.next, 'resume');
+}
+
+// A save without a next step must never replace an existing valid handoff.
+{
+  let guard = emptyState({ cwd: 'G:/proj' });
+  guard = reduceEvent(guard, { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: 'go' }] } });
+  guard = reduceEvent(guard, { type: 'tool/call', seq: 2, data: { callId: 'ok-save', name: 'agents_handoff', arguments: JSON.stringify({ action: 'save', step: 'S1', next: 'S2' }) } });
+  guard = reduceEvent(guard, { type: 'tool/result', seq: 3, data: { message: { toolCallId: 'ok-save', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(guard.continuity.next, 'S2');
+  const savedSeq = guard.continuity.savedSeq;
+  const incompleteCode = [
+    'const h = await tools.agents_handoff({ action: "save", step: "partial" });',
+    'const a = await tools.agents_index({ action: "status" });',
+    'return { h, a };',
+  ].join('\n');
+  guard = reduceEvent(guard, { type: 'tool/call', seq: 4, data: { callId: 'bad-save', name: 'run_code', arguments: JSON.stringify({ code: incompleteCode }) } });
+  guard = reduceEvent(guard, { type: 'tool/result', seq: 5, data: { message: { toolCallId: 'bad-save', isError: false, content: [{ type: 'text', text: '{"ok":true}' }] } } });
+  assert.equal(guard.continuity.next, 'S2', 'an incomplete save must not erase the valid handoff');
+  assert.equal(guard.continuity.savedSeq, savedSeq, 'an incomplete save must not change the saved sequence');
+}
+
+// pickHandoff: valid entries beat incomplete ones, and the newest covered user message wins.
+{
+  const older = { next: 'a', lastUserSeq: 5, savedSeq: 10 };
+  const newer = { next: 'b', lastUserSeq: 6, savedSeq: 11 };
+  const incomplete = { step: 'x', lastUserSeq: 9, savedSeq: 12 };
+  assert.equal(pickHandoff([older, newer]).next, 'b');
+  assert.equal(pickHandoff([older, newer, incomplete]).next, 'b', 'a valid entry must beat a newer incomplete entry');
+  assert.equal(pickHandoff([incomplete]).next, undefined, 'an incomplete entry is returned only when nothing valid exists');
+  assert.equal(pickHandoff([null, undefined]), null);
+  assert.equal(handoffHasNext({ next: '   ' }), false);
+  assert.equal(handoffHasNext({ next: 'S2' }), true);
+}
+
+const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+assert.equal(GUARD_BUILD, packageVersion, 'GUARD_BUILD must match package.json so a live status can prove which build is running');
+
 // Card marks advance by user seq even when the turn value lags.
 {
   assert.deepEqual(advanceInjectedMark({ turn: 9, seq: 740 }, 0, 1405), { turn: 0, seq: 1405 }, 'newer seq must advance');
@@ -1058,7 +1118,8 @@ assert.equal(decideIndexGate({ state: base, toolName: 'write', config: { indexGa
   const stale = Object.assign({}, state, { lastUserSeq: 11, continuity: Object.assign({}, entry, { status: 'stale' }) });
   assert.equal(continuityStatus(stale), 'stale');
   assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: true } }).allow, false);
-  assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.8, config: { continuityGate: true } }).allow, true, '80% is the emergency fallback');
+  assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.74, config: { continuityGate: true } }).allow, false, 'below 75% the stale handoff still blocks');
+  assert.equal(decideContinuity({ state: stale, toolName: 'compress', pressureRatio: 0.75, config: { continuityGate: true } }).allow, true, '75% is the emergency fallback');
   assert.equal(decideContinuity({ state: base, toolName: 'compress', pressureRatio: 0.5, config: { continuityGate: false } }).allow, true);
   let ledger = emptyState({ cwd: 'G:/work' });
   ledger = reduceEvent(ledger, { type: 'tool/call', seq: 1, data: { callId: 'h1', name: 'agents_handoff', arguments: JSON.stringify({ action: 'save', step: 'S1', next: 'S2' }) } });

@@ -2,7 +2,7 @@
 
 A DSH bundle that maintains a session index, accepts model-written memory entries, and blocks compression or mutating tools while a reasoning question is unresolved. It includes a Host entry and a small web settings page.
 
-> Verification status (0.8.5): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
+> Verification status (0.8.6): **not fully verified**. See [docs/UNVERIFIED.md](docs/UNVERIFIED.md) for the explicit list of verified and unverified behavior; absence from that list is not a guarantee.
 
 ## What it does
 
@@ -18,7 +18,7 @@ A DSH bundle that maintains a session index, accepts model-written memory entrie
 - Adds recovery (`agents_recovery`, `recoveryGate` default false): a high-impact write requires a recorded baseline bound to that change (`changeId`); a baseline for another change does not cover it, and this is a ledger entry, not an automatic backup.
 - Adds index integrity (`agents_index action=audit`, `indexGate` default false): compression requires an audit with status pass or warn; an `incomplete` audit names the missing required sections. Empty advisory sections only warn, so a session that has not written files yet can still compress.
 - Adds a task-authorization gate (`taskGate`, default false). `agents_task start` records a model-proposed goal, allowed path prefixes, and exclusions; a proposal is not user authorization. `confirm` succeeds only when the latest user message is a confirmation; `close` closes the task. When enabled, write/edit/pwsh/run_code and plugin-manager mutations require an active task, and out-of-scope or excluded paths are denied. The card shows the current task status; developer mode still bypasses it. This is a heuristic scope check, not a security boundary.
-- Adds context continuity (`continuityGate`, default true). A multi-step task records an ordered `steps` list and calls `agents_handoff save` after each completed step (step/next/preserve/discard/risks). Below the 80% context threshold, compression without a ready handoff is denied; at or above the existing `compressPressureRatio` (0.8) the host projection is allowed as a fallback. There is no separate 70% threshold. The continuity card and `AGENT_CONTINUITY.md` distinguish host-projected state from model-distilled notes; after compression, resume from the card and do not redo completed operations.
+- Adds context continuity (`continuityGate`, default true). A multi-step task records an ordered `steps` list and calls `agents_handoff save` after each completed step (step/next/preserve/discard/risks). Below the `compressPressureRatio` (default 0.75) threshold, compression without a ready handoff is denied; at or above it the host projection is allowed as a fallback. There is no separate 70% threshold. The continuity card and `AGENT_CONTINUITY.md` distinguish host-projected state from model-distilled notes; after compression, resume from the card and do not redo completed operations.
 - Works without a context-compression plugin. The compression-only gates (`denyCompress`, `continuityGate`, `indexGate`) do not run when no `compress` tool exists; index, memory, task, evidence, recovery, and handoff tools remain available. Without `tokenMeter`, there is no 80% reminder or pressure exemption, so call `agents_handoff save` at step boundaries manually. Other compression tools with different names are not intercepted.
 - Registers a tool guard for compress. `denyCompress` is fixed on and cannot be switched off. The guard denies the call when the card was not injected for the current turn, or when the latest user message arrived after the injected card. A session with no card at all is allowed only by the fixed internal fallback (`legacyCompressWithoutCard`, always true); it is not a settings-page switch. Exception: when the official `tokenMeter.contextPressure()` reports `pressureTokens / contextWindow` at or above `compressPressureRatio` (default 0.8), compress is allowed even if the card is stale or the reasoning gate is open.
 - Does not treat a user question as ambiguity. A question is only a request for information; ambiguity means the same request has multiple plausible interpretations that would change the implementation direction. In that case, ask before acting. The reasoning gate below covers unresolved questions in the model's own reasoning; it never blocks direct read-only tools.
@@ -52,7 +52,7 @@ The page shows four default feature groups — task/change management, context c
 - continuityEnabled: default true. Master switch for continuityGate and writeContinuity; numeric continuity settings remain available.
 - reasoningEnabled: default true. Master switch for reasoningGate, reasoningRiskGate, semanticReview, and writeReasoningState; numeric reasoning settings remain available.
 - memoryEnabled: default true. Master switch for recallGate, recordGate, indexGate, and writeIndex; numeric memory/index settings remain available.
-- compressPressureRatio: default 0.8. When official `tokenMeter.contextPressure()` reports at least this fraction of the route context window, compress is forced through all guard checks. The value must be greater than 0 and at most 1.
+- compressPressureRatio: default 0.75. When official `tokenMeter.contextPressure()` reports at least this fraction of the route context window, compress is forced through all guard checks. The value must be greater than 0 and at most 1.
 - legacyCompressWithoutCard: internal compatibility setting, fixed true. It allows a session that has never injected a card when the plugin loads mid-turn; it is not shown on the settings page.
 - writeIndex: default true. Set false to skip the Markdown file.
 - indexFileName: default AGENT_CONTEXT_INDEX.md.
@@ -73,7 +73,7 @@ The page shows four default feature groups — task/change management, context c
 - recoveryGate: default false. Require a recorded `agents_recovery` baseline bound to the current `changeId` before high-impact writes. A baseline from another change does not authorize the write; the baseline is user/model-provided text, not an automatic snapshot.
 - indexGate: default false. Require `agents_index action=audit` status pass or warn before compression; `incomplete` (no recorded requirements) is denied. The normal card/record gates still apply after the pressure exemption.
 - taskGate: default false. Require a user-confirmed active task with a matching path scope before write/edit/pwsh/non-read-only run_code/plugin_manager mutations; `taskGateTools` lists the guarded tools. `agents_task` itself, read-only tools, agents_index, agents_memory, and agents_verify remain allowed.
-- continuityGate: default true. Below 80% context pressure, compression requires a ready current `agents_handoff`; at or above 80% the host projection is allowed as the emergency fallback.
+- continuityGate: default true. Below 75% context pressure, compression requires a ready current `agents_handoff`; at or above 75% the host projection is allowed as the emergency fallback.
 - continuityMaxChars: default 1600; range 300–4000. Caps the continuity card and `AGENT_CONTINUITY.md`.
 - continuityFile: default AGENT_CONTINUITY.md. writeContinuity: default true; skip the file when false. The file never contains raw reasoning or a transcript.
 - reasoningGate: default true. Set false to disable the reasoning gate.
@@ -132,7 +132,7 @@ Live activation requires a new DSH session or a restart. Verify that:
 5. ask_user is allowed and a pending reasoning question remains blocked until the user replies;
 6. an assistant reasoning block such as 我不确定这个字段是否存在 denies a write call;
 7. read-only run_code is allowed, including multiple read calls; mutating run_code and write/edit/pwsh/compress are denied while a reasoning question is open; agents_verify accepts `questionId` or `questionIds` and resolves every listed ID; agents_index returns the card without opening the file.
-8. agents_handoff save returns ready; below 80% a compress without a ready handoff is denied, while the same session with a ready handoff is allowed; a new user message makes the handoff stale.
+8. agents_handoff save returns ready; below 75% a compress without a ready handoff is denied, while the same session with a ready handoff is allowed; a new user message makes the handoff stale.
 9. the settings page exposes the four group switches and their advanced options, including continuityGate, writeContinuity, and continuityMaxChars; saving changes the next guard call without a reload.
 10. group off pauses only the child policy; raw child settings and accumulated task/memory/index/continuity/reasoning data remain.
 11. an old profile without group fields derives each group from its child gates; the settings-page user layer, not the schema defaults, decides an explicit group switch.
